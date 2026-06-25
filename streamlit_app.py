@@ -2,91 +2,66 @@ import streamlit as st
 import requests
 import pandas as pd
 
-st.set_page_config(page_title="Fraud Detection Dashboard", layout="wide")
+st.set_page_config(page_title="Fraud Detection System", layout="wide")
 
 API_URL = "https://fraud-api-1d91.onrender.com/predict"
 API_KEY = "my_secret_12345"
 
-st.title("🏦 AI Fraud Detection Dashboard (Bank System)")
+st.title("💳 Bank-Grade Fraud Detection Dashboard")
 
-st.markdown("### Enter Transaction Details")
+st.markdown("Enter transaction details below to analyze fraud risk.")
 
-# ---- INPUT FORM ----
+# INPUT FORM
 with st.form("fraud_form"):
-    col1, col2, col3 = st.columns(3)
+    cols = st.columns(4)
 
-    with col1:
-        V1 = st.number_input("V1", value=0.0)
-        V2 = st.number_input("V2", value=0.0)
-        V3 = st.number_input("V3", value=0.0)
-        V4 = st.number_input("V4", value=0.0)
-        V5 = st.number_input("V5", value=0.0)
-        V6 = st.number_input("V6", value=0.0)
-        V7 = st.number_input("V7", value=0.0)
-        V8 = st.number_input("V8", value=0.0)
-        V9 = st.number_input("V9", value=0.0)
-        V10 = st.number_input("V10", value=0.0)
+    inputs = {}
 
-    with col2:
-        V11 = st.number_input("V11", value=0.0)
-        V12 = st.number_input("V12", value=0.0)
-        V13 = st.number_input("V13", value=0.0)
-        V14 = st.number_input("V14", value=0.0)
-        V15 = st.number_input("V15", value=0.0)
-        V16 = st.number_input("V16", value=0.0)
-        V17 = st.number_input("V17", value=0.0)
-        V18 = st.number_input("V18", value=0.0)
-        V19 = st.number_input("V19", value=0.0)
-        V20 = st.number_input("V20", value=0.0)
+    feature_names = [
+        "V1","V2","V3","V4","V5","V6","V7","V8",
+        "V9","V10","V11","V12","V13","V14","V15","V16",
+        "V17","V18","V19","V20","V21","V22","V23","V24",
+        "V25","V26","V27","V28","Amount","Time"
+    ]
 
-    with col3:
-        V21 = st.number_input("V21", value=0.0)
-        V22 = st.number_input("V22", value=0.0)
-        V23 = st.number_input("V23", value=0.0)
-        V24 = st.number_input("V24", value=0.0)
-        V25 = st.number_input("V25", value=0.0)
-        V26 = st.number_input("V26", value=0.0)
-        V27 = st.number_input("V27", value=0.0)
-        V28 = st.number_input("V28", value=0.0)
-        Amount = st.number_input("Amount", value=0.0)
-        Time = st.number_input("Time", value=0.0)
+    for i, name in enumerate(feature_names):
+        inputs[name] = cols[i % 4].number_input(name, value=0.0)
 
-    submit = st.form_submit_button("Check Fraud Risk")
+    submitted = st.form_submit_button("Analyze Transaction")
 
-# ---- API CALL ----
-if submit:
-    payload = {
-        "V1": V1, "V2": V2, "V3": V3, "V4": V4, "V5": V5,
-        "V6": V6, "V7": V7, "V8": V8, "V9": V9, "V10": V10,
-        "V11": V11, "V12": V12, "V13": V13, "V14": V14, "V15": V15,
-        "V16": V16, "V17": V17, "V18": V18, "V19": V19, "V20": V20,
-        "V21": V21, "V22": V22, "V23": V23, "V24": V24, "V25": V25,
-        "V26": V26, "V27": V27, "V28": V28,
-        "Amount": Amount,
-        "Time": Time
-    }
+# RESULT
+if submitted:
+    headers = {"api-key": API_KEY}
 
-    headers = {
-        "api-key": API_KEY
-    }
+    res = requests.post(API_URL, json=inputs, headers=headers)
 
-    response = requests.post(API_URL, json=payload, headers=headers)
+    result = res.json()
 
-    if response.status_code == 200:
-        result = response.json()
-
-        st.success("Prediction Completed")
-
-        st.metric("Fraud Score", result["fraud_score"])
-        st.metric("Decision", result["decision"])
-        st.metric("Risk Level", result["risk_level"])
-
-        if result["decision"] == "BLOCK":
-            st.error("🚨 TRANSACTION BLOCKED")
-        elif result["decision"] == "REVIEW":
-            st.warning("⚠️ MANUAL REVIEW REQUIRED")
-        else:
-            st.success("✅ TRANSACTION APPROVED")
-
+    if "error" in result:
+        st.error(result["error"])
     else:
-        st.error(response.text)
+        score = result["fraud_score"]
+        status = result["status"]
+
+        st.subheader("📊 Result")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.metric("Fraud Score", f"{score:.4f}")
+
+        with col2:
+            st.metric("Status", status)
+
+        # RISK INDICATOR
+        st.subheader("⚠️ Risk Level")
+
+        if score < 0.3:
+            st.success("Low Risk Transaction ✅")
+        elif score < 0.7:
+            st.warning("Medium Risk Transaction ⚠️")
+        else:
+            st.error("High Risk Transaction 🚨")
+
+        # SIMPLE BAR
+        st.progress(float(score))
