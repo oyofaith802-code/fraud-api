@@ -1,109 +1,34 @@
-import streamlit as st
-import requests
+import os
+import uuid
+import numpy as np
+from fastapi import FastAPI, Header
+from sqlalchemy import create_engine, Column, String, Integer, Float
+from sqlalchemy.orm import declarative_base, sessionmaker
+from dotenv import load_dotenv
+import joblib
 
-API_URL = "https://fraud-api-1d91.onrender.com"
+load_dotenv()
 
-st.title("🚀 Fraud SaaS Dashboard V3")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./local.db")
 
-# =========================
-# SESSION STATE
-# =========================
-if "api_key" not in st.session_state:
-    st.session_state.api_key = None
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+)
 
-menu = st.sidebar.selectbox("Menu", ["Login", "Signup", "Dashboard"])
+SessionLocal = sessionmaker(bind=engine)
+Base = declarative_base()
 
-# =========================
-# SIGNUP
-# =========================
-if menu == "Signup":
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
+app = FastAPI(title="Fraud SaaS API")
 
-    if st.button("Create Account"):
-        res = requests.post(
-            f"{API_URL}/signup",
-            params={"email": email, "password": password}
-        )
+# ================= DB =================
+class User(Base):
+    __tablename__ = "users"
 
-        try:
-            data = res.json()
-        except:
-            st.error("Server error")
-            st.stop()
-
-        if "api_key" in data:
-            st.success("Account created!")
-            st.write("API KEY:", data["api_key"])
-        else:
-            st.error(data)
-
-# =========================
-# LOGIN
-# =========================
-elif menu == "Login":
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        res = requests.post(
-            f"{API_URL}/login",
-            params={"email": email, "password": password}
-        )
-
-        try:
-            data = res.json()
-        except:
-            st.error("Server error")
-            st.stop()
-
-        if "api_key" in data:
-            st.session_state.api_key = data["api_key"]
-            st.success("Login successful")
-            st.rerun()
-        else:
-            st.error(data)
-
-# =========================
-# DASHBOARD
-# =========================
-elif menu == "Dashboard":
-
-    if not st.session_state.api_key:
-        st.warning("Please login first")
-        st.stop()
-
-    st.write("💰 SaaS Dashboard")
-    st.write("API KEY:", st.session_state.api_key)
-
-    # 30 FEATURES
-    features = []
-    for i in range(1, 31):
-        features.append(st.number_input(f"V{i}", value=0.0))
-
-    amount = st.number_input("Amount", value=0.0)
-    time = st.number_input("Time", value=0.0)
-
-    if st.button("Predict Fraud"):
-        payload = {
-            "features": features
-        }
-
-        headers = {
-            "api_key": st.session_state.api_key
-        }
-
-        res = requests.post(
-            f"{API_URL}/predict",
-            json=payload,
-            headers=headers
-        )
-
-        try:
-            data = res.json()
-        except:
-            st.error("Invalid JSON from server")
-            st.write(res.text)
-            st.stop()
-
-        st.json(data)
+    id = Column(String, primary_key=True)
+    email = Column(String, unique=True)
+    password = Column(String)
+    api_key = Column(String, unique=True)
+    plan = Column(String, default="FREE")
+    requests = Column(Integer, default=0)
+   
