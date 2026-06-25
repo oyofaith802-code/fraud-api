@@ -1,153 +1,109 @@
-import os
-import uuid
-import numpy as np
-from fastapi import FastAPI, Header
-from sqlalchemy import create_engine, Column, String, Integer, Float
-from sqlalchemy.orm import declarative_base, sessionmaker
-from dotenv import load_dotenv
-import joblib
+import streamlit as st
+import requests
 
-load_dotenv()
+API_URL = "https://fraud-api-1d91.onrender.com"
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./local.db")
+st.title("🚀 Fraud SaaS Dashboard V3")
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
-)
+# =========================
+# SESSION STATE
+# =========================
+if "api_key" not in st.session_state:
+    st.session_state.api_key = None
 
-SessionLocal = sessionmaker(bind=engine)
-Base = declarative_base()
+menu = st.sidebar.selectbox("Menu", ["Login", "Signup", "Dashboard"])
 
-app = FastAPI(title="Fraud SaaS V3")
-
-# =====================
-# USER MODEL
-# =====================
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(String, primary_key=True)
-    email = Column(String, unique=True)
-    password = Column(String)
-    api_key = Column(String, unique=True)
-
-    plan = Column(String, default="FREE")
-    requests = Column(Integer, default=0)
-    limit = Column(Integer, default=10)
-    revenue = Column(Float, default=0.0)
-
-Base.metadata.create_all(bind=engine)
-
-# =====================
-# MODEL
-# =====================
-rf_model = joblib.load("rf_model.pkl")
-scaler = joblib.load("scaler.pkl")
-
-
-# =====================
-# HELPERS
-# =====================
-def db():
-    return SessionLocal()
-
-
-def get_user(api_key: str):
-    session = db()
-    user = session.query(User).filter(User.api_key == api_key).first()
-    session.close()
-    return user
-
-
-# =====================
-# HOME
-# =====================
-@app.get("/")
-def home():
-    return {"status": "Fraud SaaS V3 Running"}
-
-
-# =====================
+# =========================
 # SIGNUP
-# =====================
-@app.post("/signup")
-def signup(email: str, password: str):
-    session = db()
+# =========================
+if menu == "Signup":
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
 
-    if session.query(User).filter(User.email == email).first():
-        session.close()
-        return {"error": "User exists"}
+    if st.button("Create Account"):
+        res = requests.post(
+            f"{API_URL}/signup",
+            params={"email": email, "password": password}
+        )
 
-    user = User(
-        id=str(uuid.uuid4()),
-        email=email,
-        password=password,
-        api_key="fk_" + uuid.uuid4().hex[:24],
-    )
+        try:
+            data = res.json()
+        except:
+            st.error("Server error")
+            st.stop()
 
-    session.add(user)
-    session.commit()
-    session.close()
+        if "api_key" in data:
+            st.success("Account created!")
+            st.write("API KEY:", data["api_key"])
+        else:
+            st.error(data)
 
-    return {"api_key": user.api_key}
-
-
-# =====================
+# =========================
 # LOGIN
-# =====================
-@app.post("/login")
-def login(email: str, password: str):
-    session = db()
+# =========================
+elif menu == "Login":
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
 
-    user = session.query(User).filter(User.email == email).first()
-    session.close()
+    if st.button("Login"):
+        res = requests.post(
+            f"{API_URL}/login",
+            params={"email": email, "password": password}
+        )
 
-    if not user or user.password != password:
-        return {"error": "Invalid credentials"}
+        try:
+            data = res.json()
+        except:
+            st.error("Server error")
+            st.stop()
 
-    return {
-        "api_key": user.api_key,
-        "plan": user.plan,
-        "requests": user.requests
-    }
+        if "api_key" in data:
+            st.session_state.api_key = data["api_key"]
+            st.success("Login successful")
+            st.rerun()
+        else:
+            st.error(data)
 
+# =========================
+# DASHBOARD
+# =========================
+elif menu == "Dashboard":
 
-# =====================
-# PREDICT (FIXED 30 FEATURES)
-# =====================
-@app.post("/predict")
-def predict(payload: dict, api_key: str = Header(None)):
+    if not st.session_state.api_key:
+        st.warning("Please login first")
+        st.stop()
 
-    user = get_user(api_key)
+    st.write("💰 SaaS Dashboard")
+    st.write("API KEY:", st.session_state.api_key)
 
-    if not user:
-        return {"error": "Invalid API key"}
+    # 30 FEATURES
+    features = []
+    for i in range(1, 31):
+        features.append(st.number_input(f"V{i}", value=0.0))
 
-    if user.requests >= user.limit:
-        return {"error": "Limit reached"}
+    amount = st.number_input("Amount", value=0.0)
+    time = st.number_input("Time", value=0.0)
 
-    features = payload.get("features")
-
-    if not features or len(features) != 30:
-        return {
-            "error": "Model requires 30 features",
-            "received": len(features) if features else 0
+    if st.button("Predict Fraud"):
+        payload = {
+            "features": features
         }
 
-    values = np.array([features], dtype=float)
-    scaled = scaler.transform(values)
+        headers = {
+            "api_key": st.session_state.api_key
+        }
 
-    score = rf_model.predict_proba(scaled)[0][1]
+        res = requests.post(
+            f"{API_URL}/predict",
+            json=payload,
+            headers=headers
+        )
 
-    session = db()
-    user.requests += 1
-    session.merge(user)
-    session.commit()
-    session.close()
+        try:
+            data = res.json()
+        except:
+            st.error("Invalid JSON from server")
+            st.write(res.text)
+            st.stop()
 
-    return {
-        "fraud_score": float(score),
-        "status": "FRAUD" if score > 0.5 else "NORMAL",
-        "remaining": user.limit - user.requests
-    }
+        st.json(data)
