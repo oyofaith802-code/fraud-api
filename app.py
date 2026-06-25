@@ -6,7 +6,12 @@ import numpy as np
 
 app = FastAPI()
 
-API_KEY = "my_secret_12345"
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+API_KEY = os.getenv("API_KEY")
 
 # Load models
 rf_model = joblib.load("rf_model.pkl")
