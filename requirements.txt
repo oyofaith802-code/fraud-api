@@ -9,3 +9,4 @@ scikit-learn
 pandas
 PyJWT
 matplotlib
+psycopg2-binary
