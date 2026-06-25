@@ -1,21 +1,24 @@
 import streamlit as st
 import requests
 import pandas as pd
+import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Fraud Detection System", layout="wide")
+st.set_page_config(page_title="Fraud Analytics Dashboard", layout="wide")
 
 API_URL = "https://fraud-api-1d91.onrender.com/predict"
 API_KEY = "my_secret_12345"
 
-st.title("💳 Bank-Grade Fraud Detection Dashboard")
+st.title("🏦 Fraud Detection Analytics Dashboard")
 
-st.markdown("Enter transaction details below to analyze fraud risk.")
+# SESSION STORAGE
+if "history" not in st.session_state:
+    st.session_state.history = []
 
-# INPUT FORM
-with st.form("fraud_form"):
+# ---------------- INPUT ----------------
+st.subheader("🔎 New Transaction Analysis")
+
+with st.form("form"):
     cols = st.columns(4)
-
-    inputs = {}
 
     feature_names = [
         "V1","V2","V3","V4","V5","V6","V7","V8",
@@ -24,17 +27,17 @@ with st.form("fraud_form"):
         "V25","V26","V27","V28","Amount","Time"
     ]
 
+    data = {}
+
     for i, name in enumerate(feature_names):
-        inputs[name] = cols[i % 4].number_input(name, value=0.0)
+        data[name] = cols[i % 4].number_input(name, value=0.0)
 
-    submitted = st.form_submit_button("Analyze Transaction")
+    submitted = st.form_submit_button("Analyze")
 
-# RESULT
+# ---------------- API CALL ----------------
 if submitted:
     headers = {"api-key": API_KEY}
-
-    res = requests.post(API_URL, json=inputs, headers=headers)
-
+    res = requests.post(API_URL, json=data, headers=headers)
     result = res.json()
 
     if "error" in result:
@@ -43,25 +46,62 @@ if submitted:
         score = result["fraud_score"]
         status = result["status"]
 
-        st.subheader("📊 Result")
+        # save history
+        st.session_state.history.append({
+            "score": score,
+            "status": status
+        })
 
-        col1, col2 = st.columns(2)
+        st.success("Analysis Complete")
 
-        with col1:
-            st.metric("Fraud Score", f"{score:.4f}")
+        col1, col2, col3 = st.columns(3)
 
-        with col2:
-            st.metric("Status", status)
-
-        # RISK INDICATOR
-        st.subheader("⚠️ Risk Level")
+        col1.metric("Fraud Score", f"{score:.4f}")
+        col2.metric("Status", status)
 
         if score < 0.3:
-            st.success("Low Risk Transaction ✅")
+            col3.success("LOW RISK")
         elif score < 0.7:
-            st.warning("Medium Risk Transaction ⚠️")
+            col3.warning("MEDIUM RISK")
         else:
-            st.error("High Risk Transaction 🚨")
+            col3.error("HIGH RISK")
 
-        # SIMPLE BAR
         st.progress(float(score))
+
+# ---------------- ANALYTICS ----------------
+st.subheader("📊 Analytics Overview")
+
+history = st.session_state.history
+
+if len(history) > 0:
+
+    df = pd.DataFrame(history)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.metric("Total Transactions", len(df))
+        st.metric("Fraud Detected", (df["status"] == "FRAUD").sum())
+
+    with col2:
+        fraud_rate = (df["status"] == "FRAUD").mean() * 100
+        st.metric("Fraud Rate %", f"{fraud_rate:.2f}%")
+
+    # ---------------- CHART 1 ----------------
+    st.subheader("📈 Fraud vs Normal Distribution")
+
+    fig1, ax1 = plt.subplots()
+    df["status"].value_counts().plot(kind="bar", ax=ax1)
+    ax1.set_ylabel("Count")
+    st.pyplot(fig1)
+
+    # ---------------- CHART 2 ----------------
+    st.subheader("📉 Fraud Score Distribution")
+
+    fig2, ax2 = plt.subplots()
+    ax2.hist(df["score"], bins=10)
+    ax2.set_xlabel("Fraud Score")
+    st.pyplot(fig2)
+
+else:
+    st.info("No transactions yet. Run a prediction to see analytics.")
