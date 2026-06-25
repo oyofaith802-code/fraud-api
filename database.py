@@ -7,40 +7,23 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# -------------------------
-# SAFE FALLBACK (IMPORTANT)
-# -------------------------
 if not DATABASE_URL:
-    print("⚠️ WARNING: DATABASE_URL not set. Using SQLite fallback.")
-    DATABASE_URL = "sqlite:///./local.db"
+    raise Exception("DATABASE_URL missing")
 
-# -------------------------
-# ENGINE
-# -------------------------
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-)
-
+engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 
-# -------------------------
-# USER MODEL
-# -------------------------
+
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True)
+    id = Column(String, primary_key=True)
+    username = Column(String)
     api_key = Column(String, unique=True)
-    plan = Column(String, default="FREE")
     requests = Column(Integer, default=0)
     limit = Column(Integer, default=5)
-    revenue = Column(Integer, default=0)
 
-# -------------------------
-# INIT DB
-# -------------------------
+
 def init_db():
     Base.metadata.create_all(bind=engine)
