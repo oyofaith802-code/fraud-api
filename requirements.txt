@@ -3,8 +3,8 @@ uvicorn
 numpy
 pandas
 scikit-learn
-xgboost
 joblib
 python-dotenv
-streamlit
 requests
+sqlalchemy
+psycopg2-binary
