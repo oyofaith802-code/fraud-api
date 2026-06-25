@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Header
 import joblib
-import numpy as np
 import pandas as pd
 from pydantic import BaseModel
 
@@ -13,37 +12,21 @@ rf_model = joblib.load("rf_model.pkl")
 xgb_model = joblib.load("xgb_model.pkl")
 scaler = joblib.load("scaler.pkl")
 
+# MUST MATCH TRAINING ORDER
+cols = [
+    "V1","V2","V3","V4","V5","V6","V7","V8","V9","V10",
+    "V11","V12","V13","V14","V15","V16","V17","V18","V19","V20",
+    "V21","V22","V23","V24","V25","V26","V27","V28","Amount","Time"
+]
 
-# Input schema (IMPORTANT for correct feature order)
+# Input schema
 class Transaction(BaseModel):
-    V1: float
-    V2: float
-    V3: float
-    V4: float
-    V5: float
-    V6: float
-    V7: float
-    V8: float
-    V9: float
-    V10: float
-    V11: float
-    V12: float
-    V13: float
-    V14: float
-    V15: float
-    V16: float
-    V17: float
-    V18: float
-    V19: float
-    V20: float
-    V21: float
-    V22: float
-    V23: float
-    V24: float
-    V25: float
-    V26: float
-    V27: float
-    V28: float
+    V1: float; V2: float; V3: float; V4: float; V5: float
+    V6: float; V7: float; V8: float; V9: float; V10: float
+    V11: float; V12: float; V13: float; V14: float; V15: float
+    V16: float; V17: float; V18: float; V19: float; V20: float
+    V21: float; V22: float; V23: float; V24: float; V25: float
+    V26: float; V27: float; V28: float
     Amount: float
     Time: float
 
@@ -56,8 +39,11 @@ def predict(data: Transaction, api_key: str = Header(None)):
         if api_key != API_KEY:
             return {"error": "Unauthorized: Invalid API Key"}
 
-        # Convert input to DataFrame (VERY IMPORTANT for feature order)
+        # Convert to DataFrame (IMPORTANT)
         df = pd.DataFrame([data.dict()])
+
+        # FORCE correct column order
+        df = df[cols]
 
         # Scale
         df_scaled = scaler.transform(df)
