@@ -1,25 +1,92 @@
 import streamlit as st
 import requests
+import pandas as pd
+
+st.set_page_config(page_title="Fraud Detection Dashboard", layout="wide")
 
 API_URL = "https://fraud-api-1d91.onrender.com/predict"
+API_KEY = "my_secret_12345"
 
-st.title("Fraud Detection App")
+st.title("🏦 AI Fraud Detection Dashboard (Bank System)")
 
-amount = st.number_input("Amount")
-time = st.number_input("Time")
+st.markdown("### Enter Transaction Details")
 
-if st.button("Predict"):
-    data = {
-        "V1": 0, "V2": 0, "V3": 0, "V4": 0,
-        "V5": 0, "V6": 0, "V7": 0, "V8": 0,
-        "V9": 0, "V10": 0, "V11": 0, "V12": 0,
-        "V13": 0, "V14": 0, "V15": 0, "V16": 0,
-        "V17": 0, "V18": 0, "V19": 0, "V20": 0,
-        "V21": 0, "V22": 0, "V23": 0, "V24": 0,
-        "V25": 0, "V26": 0, "V27": 0, "V28": 0,
-        "Amount": amount,
-        "Time": time
+# ---- INPUT FORM ----
+with st.form("fraud_form"):
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        V1 = st.number_input("V1", value=0.0)
+        V2 = st.number_input("V2", value=0.0)
+        V3 = st.number_input("V3", value=0.0)
+        V4 = st.number_input("V4", value=0.0)
+        V5 = st.number_input("V5", value=0.0)
+        V6 = st.number_input("V6", value=0.0)
+        V7 = st.number_input("V7", value=0.0)
+        V8 = st.number_input("V8", value=0.0)
+        V9 = st.number_input("V9", value=0.0)
+        V10 = st.number_input("V10", value=0.0)
+
+    with col2:
+        V11 = st.number_input("V11", value=0.0)
+        V12 = st.number_input("V12", value=0.0)
+        V13 = st.number_input("V13", value=0.0)
+        V14 = st.number_input("V14", value=0.0)
+        V15 = st.number_input("V15", value=0.0)
+        V16 = st.number_input("V16", value=0.0)
+        V17 = st.number_input("V17", value=0.0)
+        V18 = st.number_input("V18", value=0.0)
+        V19 = st.number_input("V19", value=0.0)
+        V20 = st.number_input("V20", value=0.0)
+
+    with col3:
+        V21 = st.number_input("V21", value=0.0)
+        V22 = st.number_input("V22", value=0.0)
+        V23 = st.number_input("V23", value=0.0)
+        V24 = st.number_input("V24", value=0.0)
+        V25 = st.number_input("V25", value=0.0)
+        V26 = st.number_input("V26", value=0.0)
+        V27 = st.number_input("V27", value=0.0)
+        V28 = st.number_input("V28", value=0.0)
+        Amount = st.number_input("Amount", value=0.0)
+        Time = st.number_input("Time", value=0.0)
+
+    submit = st.form_submit_button("Check Fraud Risk")
+
+# ---- API CALL ----
+if submit:
+    payload = {
+        "V1": V1, "V2": V2, "V3": V3, "V4": V4, "V5": V5,
+        "V6": V6, "V7": V7, "V8": V8, "V9": V9, "V10": V10,
+        "V11": V11, "V12": V12, "V13": V13, "V14": V14, "V15": V15,
+        "V16": V16, "V17": V17, "V18": V18, "V19": V19, "V20": V20,
+        "V21": V21, "V22": V22, "V23": V23, "V24": V24, "V25": V25,
+        "V26": V26, "V27": V27, "V28": V28,
+        "Amount": Amount,
+        "Time": Time
     }
 
-    res = requests.post(API_URL, json=data)
-    st.write(res.json())
+    headers = {
+        "api-key": API_KEY
+    }
+
+    response = requests.post(API_URL, json=payload, headers=headers)
+
+    if response.status_code == 200:
+        result = response.json()
+
+        st.success("Prediction Completed")
+
+        st.metric("Fraud Score", result["fraud_score"])
+        st.metric("Decision", result["decision"])
+        st.metric("Risk Level", result["risk_level"])
+
+        if result["decision"] == "BLOCK":
+            st.error("🚨 TRANSACTION BLOCKED")
+        elif result["decision"] == "REVIEW":
+            st.warning("⚠️ MANUAL REVIEW REQUIRED")
+        else:
+            st.success("✅ TRANSACTION APPROVED")
+
+    else:
+        st.error(response.text)
