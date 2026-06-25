@@ -56,6 +56,11 @@ app = FastAPI(title="Fraud SaaS API")
 def home():
     return {"status": "Fraud API Running"}
 
+@app.get("/reset-db")
+def reset_db():
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    return {"status": "database reset done"}
 
 # =========================
 # LOAD MODEL
