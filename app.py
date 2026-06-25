@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Header
+import os
 import joblib
 import numpy as np
-import os
 import uuid
 import requests
 from dotenv import load_dotenv
@@ -11,7 +11,7 @@ from database import SessionLocal, User, init_db
 load_dotenv()
 init_db()
 
-app = FastAPI(title="Fraud Detection SaaS API")
+app = FastAPI()
 
 # ENV
 API_KEY = os.getenv("API_KEY")
@@ -24,22 +24,20 @@ xgb_model = joblib.load("xgb_model.pkl")
 scaler = joblib.load("scaler.pkl")
 
 
-# ---------------- DATABASE ----------------
-def get_user(api_key, db):
-    return db.query(User).filter(User.api_key == api_key).first()
-
-
-# ---------------- SIGNUP ----------------
+# ------------------------
+# SIGNUP
+# ------------------------
 @app.post("/signup")
 def signup(email: str):
     db = SessionLocal()
 
     user = User(
-        id=str(uuid.uuid4()),
-        username=email,
+        id=None,
+        email=email,
         api_key="fk_" + uuid.uuid4().hex[:20],
         requests=0,
-        limit=5
+        limit=5,
+        revenue=0
     )
 
     db.add(user)
@@ -47,11 +45,21 @@ def signup(email: str):
 
     return {
         "email": email,
-        "api_key": user.api_key
+        "api_key": user.api_key,
+        "plan": "FREE"
     }
 
 
-# ---------------- PREDICT ----------------
+# ------------------------
+# GET USER
+# ------------------------
+def get_user(api_key, db):
+    return db.query(User).filter(User.api_key == api_key).first()
+
+
+# ------------------------
+# PREDICT API (SAAS CORE)
+# ------------------------
 @app.post("/predict")
 def predict(
     V1: float, V2: float, V3: float, V4: float, V5: float,
@@ -72,18 +80,22 @@ def predict(
         return {"error": "Invalid API key"}
 
     if user.requests >= user.limit:
-        return {"error": "Free limit reached"}
+        return {"error": "Free limit reached. Upgrade plan."}
 
-    values = [V1,V2,V3,V4,V5,V6,V7,V8,V9,V10,
-               V11,V12,V13,V14,V15,V16,V17,V18,V19,V20,
-               V21,V22,V23,V24,V25,V26,V27,V28,
-               Amount,Time]
+    values = [
+        V1,V2,V3,V4,V5,V6,V7,V8,V9,V10,
+        V11,V12,V13,V14,V15,V16,V17,V18,V19,V20,
+        V21,V22,V23,V24,V25,V26,V27,V28,
+        Amount,Time
+    ]
 
     arr = np.array(values).reshape(1, -1)
     scaled = scaler.transform(arr)
 
-    score = (rf_model.predict_proba(scaled)[0][1] +
-             xgb_model.predict_proba(scaled)[0][1]) / 2
+    score = (
+        rf_model.predict_proba(scaled)[0][1] +
+        xgb_model.predict_proba(scaled)[0][1]
+    ) / 2
 
     user.requests += 1
     db.commit()
@@ -95,13 +107,20 @@ def predict(
     }
 
 
-# ---------------- ADMIN STATS ----------------
+# ------------------------
+# ADMIN STATS (FOR DASHBOARD)
+# ------------------------
 @app.get("/admin/stats")
 def admin_stats():
     db = SessionLocal()
     users = db.query(User).all()
 
+    total_users = len(users)
+    total_requests = sum(u.requests for u in users)
+    total_revenue = sum(u.revenue for u in users)
+
     return {
-        "total_users": len(users),
-        "total_requests": sum(u.requests for u in users)
+        "total_users": total_users,
+        "total_requests": total_requests,
+        "total_revenue": total_revenue
     }

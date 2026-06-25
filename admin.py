@@ -1,31 +1,11 @@
-import streamlit as st
-import requests
-import pandas as pd
-import matplotlib.pyplot as plt
+from database import SessionLocal, User
 
-st.set_page_config(page_title="Fraud SaaS Dashboard", layout="wide")
+def get_stats():
+    db = SessionLocal()
+    users = db.query(User).all()
 
-st.title("💰 Fraud Detection SaaS Dashboard")
-
-API_URL = "https://fraud-api-1d91.onrender.com/admin/stats"
-
-try:
-    data = requests.get(API_URL).json()
-except:
-    st.error("API not reachable")
-    st.stop()
-
-# METRICS
-col1, col2 = st.columns(2)
-
-col1.metric("Total Users", data["total_users"])
-col2.metric("Total Requests", data["total_requests"])
-
-# CHART
-st.subheader("Usage Analytics")
-
-fig, ax = plt.subplots()
-ax.bar(["Users", "Requests"], [data["total_users"], data["total_requests"]])
-st.pyplot(fig)
-
-st.success("System running 🚀")
+    return {
+        "total_users": len(users),
+        "total_requests": sum(u.requests or 0 for u in users),
+        "total_revenue": sum(u.revenue or 0 for u in users)
+    }
