@@ -6,6 +6,6 @@ def get_stats():
 
     return {
         "total_users": len(users),
-        "total_requests": sum(u.requests or 0 for u in users),
-        "total_revenue": sum(u.revenue or 0 for u in users)
+        "total_requests": sum(u.requests for u in users),
+        "total_revenue": sum(u.revenue for u in users)
     }
