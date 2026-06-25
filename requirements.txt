@@ -8,7 +8,4 @@ joblib
 scikit-learn
 pandas
 PyJWT
-matplotlib
-passlib[bcrypt]
-python-multipart
-slowapi
+matplotlip
