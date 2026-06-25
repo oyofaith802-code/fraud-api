@@ -10,4 +10,3 @@ scikit-learn
 requests
 matplotlib
 streamlit
-xgboost
