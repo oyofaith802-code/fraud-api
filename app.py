@@ -1,7 +1,7 @@
 import os
 import uuid
 import numpy as np
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, Header
 from sqlalchemy import create_engine, Column, String, Integer, Float
 from sqlalchemy.orm import declarative_base, sessionmaker
 from dotenv import load_dotenv
@@ -21,9 +21,9 @@ Base = declarative_base()
 
 app = FastAPI(title="Fraud SaaS V3")
 
-# =========================
-# USER TABLE
-# =========================
+# =====================
+# USER MODEL
+# =====================
 class User(Base):
     __tablename__ = "users"
 
@@ -31,87 +31,80 @@ class User(Base):
     email = Column(String, unique=True)
     password = Column(String)
     api_key = Column(String, unique=True)
+
     plan = Column(String, default="FREE")
     requests = Column(Integer, default=0)
-    limit = Column(Integer, default=2)
+    limit = Column(Integer, default=10)
     revenue = Column(Float, default=0.0)
-
 
 Base.metadata.create_all(bind=engine)
 
-# =========================
-# LOAD MODEL
-# =========================
+# =====================
+# MODEL
+# =====================
 rf_model = joblib.load("rf_model.pkl")
 scaler = joblib.load("scaler.pkl")
 
 
-# =========================
+# =====================
 # HELPERS
-# =========================
-def get_db():
+# =====================
+def db():
     return SessionLocal()
 
 
-def get_user_by_key(api_key: str):
-    db = get_db()
-    user = db.query(User).filter(User.api_key == api_key).first()
-    db.close()
+def get_user(api_key: str):
+    session = db()
+    user = session.query(User).filter(User.api_key == api_key).first()
+    session.close()
     return user
 
 
-# =========================
+# =====================
 # HOME
-# =========================
+# =====================
 @app.get("/")
 def home():
-    return {"status": "Fraud SaaS API running"}
+    return {"status": "Fraud SaaS V3 Running"}
 
 
-# =========================
-# SIGNUP (FIXED)
-# =========================
+# =====================
+# SIGNUP
+# =====================
 @app.post("/signup")
 def signup(email: str, password: str):
+    session = db()
 
-    db = get_db()
-
-    existing = db.query(User).filter(User.email == email).first()
-    if existing:
-        db.close()
-        return {"error": "User already exists"}
+    if session.query(User).filter(User.email == email).first():
+        session.close()
+        return {"error": "User exists"}
 
     user = User(
         id=str(uuid.uuid4()),
         email=email,
         password=password,
-        api_key="fk_" + uuid.uuid4().hex[:20],
-        plan="FREE",
-        requests=0,
-        limit=2
+        api_key="fk_" + uuid.uuid4().hex[:24],
     )
 
-    db.add(user)
-    db.commit()
-    db.close()
+    session.add(user)
+    session.commit()
+    session.close()
 
     return {"api_key": user.api_key}
 
 
-# =========================
-# LOGIN (CRITICAL FIX)
-# =========================
+# =====================
+# LOGIN
+# =====================
 @app.post("/login")
 def login(email: str, password: str):
+    session = db()
 
-    db = get_db()
-
-    user = db.query(User).filter(User.email == email).first()
-
-    db.close()
+    user = session.query(User).filter(User.email == email).first()
+    session.close()
 
     if not user or user.password != password:
-        return {"error": "Invalid login"}
+        return {"error": "Invalid credentials"}
 
     return {
         "api_key": user.api_key,
@@ -120,13 +113,13 @@ def login(email: str, password: str):
     }
 
 
-# =========================
+# =====================
 # PREDICT (FIXED 30 FEATURES)
-# =========================
+# =====================
 @app.post("/predict")
 def predict(payload: dict, api_key: str = Header(None)):
 
-    user = get_user_by_key(api_key)
+    user = get_user(api_key)
 
     if not user:
         return {"error": "Invalid API key"}
@@ -134,52 +127,27 @@ def predict(payload: dict, api_key: str = Header(None)):
     if user.requests >= user.limit:
         return {"error": "Limit reached"}
 
-    try:
-        features = payload.get("features")
+    features = payload.get("features")
 
-        if not features:
-            return {"error": "Missing features"}
-
-        values = np.array([features], dtype=float)
-
-        # MUST BE 30 FEATURES
-        if values.shape[1] != 30:
-            return {
-                "error": "Model expects 30 features",
-                "received": int(values.shape[1])
-            }
-
-        scaled = scaler.transform(values)
-
-        score = rf_model.predict_proba(scaled)[0][1]
-
-        db = get_db()
-        user.requests += 1
-        db.merge(user)
-        db.commit()
-        db.close()
-
+    if not features or len(features) != 30:
         return {
-            "fraud_score": float(score),
-            "status": "FRAUD" if score > 0.5 else "NORMAL",
-            "remaining": user.limit - user.requests
+            "error": "Model requires 30 features",
+            "received": len(features) if features else 0
         }
 
-    except Exception as e:
-        return {"error": str(e)}
+    values = np.array([features], dtype=float)
+    scaled = scaler.transform(values)
 
+    score = rf_model.predict_proba(scaled)[0][1]
 
-# =========================
-# ADMIN STATS
-# =========================
-@app.get("/admin/stats")
-def stats():
-    db = get_db()
-    users = db.query(User).all()
-    db.close()
+    session = db()
+    user.requests += 1
+    session.merge(user)
+    session.commit()
+    session.close()
 
     return {
-        "total_users": len(users),
-        "total_requests": sum(u.requests for u in users),
-        "total_revenue": sum(u.revenue for u in users)
+        "fraud_score": float(score),
+        "status": "FRAUD" if score > 0.5 else "NORMAL",
+        "remaining": user.limit - user.requests
     }
