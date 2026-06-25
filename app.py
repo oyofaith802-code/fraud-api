@@ -1,35 +1,33 @@
 import os
 import uuid
+import jwt
+import time
+import json
 import numpy as np
-import joblib
+import pandas as pd
 import requests
 
-from fastapi import FastAPI, Header, HTTPException
-from sqlalchemy import create_engine, Column, String, Integer, Float
-from sqlalchemy.orm import declarative_base, sessionmaker
+from datetime import datetime, timedelta
+
+from fastapi import FastAPI, Header, HTTPException, Depends
+from sqlalchemy import create_engine, Column, String, Integer, Float, Text
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from dotenv import load_dotenv
 
-# =========================
-# INIT
-# =========================
+import joblib
+
+# ================= ENV =================
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL") or "sqlite:///./local.db"
-PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY")
+SECRET_KEY = os.getenv("JWT_SECRET", "secret123")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./local.db")
+PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY", "")
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 
-# =========================
-# APP
-# =========================
-app = FastAPI(title="Fraud SaaS API")
+# ================= APP =================
+app = FastAPI(title="Fraud SaaS V4 - Stripe Level")
 
-@app.get("/")
-def home():
-    return {"status": "running", "service": "Fraud SaaS API"}
-
-# =========================
-# DB
-# =========================
+# ================= DB =================
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
@@ -38,68 +36,74 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# ================= USER =================
 class User(Base):
     __tablename__ = "users"
 
     id = Column(String, primary_key=True)
     email = Column(String, unique=True)
     password = Column(String)
-    api_key = Column(String, unique=True)
 
     plan = Column(String, default="FREE")
     requests = Column(Integer, default=0)
-    limit = Column(Integer, default=3)
+    limit = Column(Integer, default=5)
 
     revenue = Column(Float, default=0)
+    usage_log = Column(Text, default="[]")
 
 Base.metadata.create_all(bind=engine)
 
-# =========================
-# SAFE MODEL LOADING (NO CRASH)
-# =========================
-try:
-    rf_model = joblib.load("rf_model.pkl")
-    scaler = joblib.load("scaler.pkl")
-except Exception as e:
-    rf_model = None
-    scaler = None
-    print("⚠️ Model not loaded:", e)
+# ================= LOAD MODEL =================
+rf_model = joblib.load("rf_model.pkl")
+scaler = joblib.load("scaler.pkl")
 
-# =========================
-# HELPERS
-# =========================
-def get_user(api_key: str):
-    db = SessionLocal()
-    return db.query(User).filter(User.api_key == api_key).first()
+# ================= JWT =================
+def create_token(user_id):
+    payload = {
+        "user_id": user_id,
+        "exp": datetime.utcnow() + timedelta(days=7)
+    }
+    return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
-# =========================
-# AUTH
-# =========================
+def verify_token(token):
+    try:
+        return jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+    except:
+        return None
+
+# ================= RATE LIMIT (STRIPE STYLE) =================
+def rate_limit(user: User):
+    if user.requests >= user.limit:
+        raise HTTPException(429, "Rate limit exceeded")
+
+# ================= SIGNUP =================
 @app.post("/signup")
-def signup(email: str, password: str):
-    db = SessionLocal()
+def signup(email: str, password: str, db: Session = Depends(get_db)):
 
     if db.query(User).filter(User.email == email).first():
-        raise HTTPException(status_code=400, detail="User exists")
+        raise HTTPException(400, "User exists")
 
     user = User(
         id=str(uuid.uuid4()),
         email=email,
-        password=password,
-        api_key="fk_" + uuid.uuid4().hex[:24],
-        plan="FREE",
-        limit=3
+        password=password
     )
 
     db.add(user)
     db.commit()
 
-    return {"message": "created", "api_key": user.api_key}
+    return {"message": "created"}
 
-
+# ================= LOGIN (JWT) =================
 @app.post("/login")
-def login(email: str, password: str):
-    db = SessionLocal()
+def login(email: str, password: str, db: Session = Depends(get_db)):
 
     user = db.query(User).filter(
         User.email == email,
@@ -107,118 +111,107 @@ def login(email: str, password: str):
     ).first()
 
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid login")
+        raise HTTPException(401, "Invalid login")
+
+    token = create_token(user.id)
 
     return {
-        "api_key": user.api_key,
-        "plan": user.plan,
-        "requests": user.requests
+        "token": token,
+        "plan": user.plan
     }
 
-# =========================
-# PREDICTION API
-# =========================
+# ================= GET USER FROM TOKEN =================
+def get_user(db, token):
+    data = verify_token(token)
+    if not data:
+        return None
+    return db.query(User).filter(User.id == data["user_id"]).first()
+
+# ================= PREDICT + EXPLAINABLE AI =================
 @app.post("/predict")
-def predict(
-    V1: float, V2: float, V3: float,
-    Amount: float, Time: float,
-    api_key: str = Header(None)
-):
-    user = get_user(api_key)
+def predict(V1: float, V2: float, V3: float, Amount: float, Time: float,
+            authorization: str = Header(None),
+            db: Session = Depends(get_db)):
+
+    token = authorization.replace("Bearer ", "")
+    user = get_user(db, token)
 
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+        raise HTTPException(401, "Invalid token")
 
-    if user.requests >= user.limit:
-        return {"error": "limit reached"}
+    rate_limit(user)
 
-    if not rf_model or not scaler:
-        return {"error": "model not available"}
+    x = np.array([[V1, V2, V3, Amount, Time]])
+    x = scaler.transform(x)
 
-    X = np.array([[V1, V2, V3, Amount, Time]])
-    X = scaler.transform(X)
+    score = float(rf_model.predict_proba(x)[0][1])
 
-    score = rf_model.predict_proba(X)[0][1]
+    reasons = []
+    if Amount > 1000:
+        reasons.append("High transaction value")
+    if V3 < -2:
+        reasons.append("Anomaly pattern detected")
+    if score > 0.7:
+        reasons.append("High model confidence fraud")
 
     user.requests += 1
 
-    db = SessionLocal()
-    db.merge(user)
+    logs = json.loads(user.usage_log)
+    logs.append({
+        "time": str(datetime.utcnow()),
+        "score": score
+    })
+    user.usage_log = json.dumps(logs)
+
     db.commit()
 
     return {
-        "fraud_score": float(score),
+        "fraud_score": score,
         "status": "FRAUD" if score > 0.5 else "NORMAL",
-        "remaining": user.limit - user.requests
+        "reasons": reasons
     }
 
-# =========================
-# PAYSTACK PAYMENT
-# =========================
-@app.post("/paystack/pay")
-def paystack_pay(email: str, plan: str):
+# ================= ANALYTICS =================
+@app.get("/analytics")
+def analytics(authorization: str = Header(None),
+              db: Session = Depends(get_db)):
 
-    prices = {
-        "daily": 2000,
-        "monthly": 10000
+    token = authorization.replace("Bearer ", "")
+    user = get_user(db, token)
+
+    logs = json.loads(user.usage_log)
+
+    df = pd.DataFrame(logs)
+
+    return {
+        "total_requests": user.requests,
+        "avg_score": float(df["score"].mean()) if len(df) > 0 else 0,
+        "heatmap": logs
     }
 
-    amount = prices.get(plan, 2000) * 100
+# ================= BILLING HISTORY =================
+@app.get("/billing")
+def billing(authorization: str = Header(None),
+            db: Session = Depends(get_db)):
 
-    res = requests.post(
-        "https://api.paystack.co/transaction/initialize",
-        headers={
-            "Authorization": f"Bearer {PAYSTACK_SECRET}",
-            "Content-Type": "application/json"
-        },
-        json={
-            "email": email,
-            "amount": amount,
-            "callback_url": f"{BASE_URL}/paystack/callback"
-        }
-    )
+    token = authorization.replace("Bearer ", "")
+    user = get_user(db, token)
 
-    return res.json()
+    return {
+        "plan": user.plan,
+        "requests": user.requests,
+        "limit": user.limit,
+        "revenue": user.revenue
+    }
 
-# =========================
-# PAYSTACK CALLBACK (AUTO UPGRADE)
-# =========================
-@app.get("/paystack/callback")
-def callback(reference: str):
+# ================= ADMIN =================
+@app.get("/admin")
+def admin(db: Session = Depends(get_db)):
 
-    res = requests.get(
-        f"https://api.paystack.co/transaction/verify/{reference}",
-        headers={"Authorization": f"Bearer {PAYSTACK_SECRET}"}
-    ).json()
-
-    if res["data"]["status"] == "success":
-
-        email = res["data"]["customer"]["email"]
-        amount = res["data"]["amount"] / 100
-
-        db = SessionLocal()
-        user = db.query(User).filter(User.email == email).first()
-
-        if user:
-            user.plan = "PRO"
-            user.limit = 1000
-            user.revenue += amount
-            db.commit()
-
-        return {"status": "upgraded"}
-
-    return {"status": "failed"}
-
-# =========================
-# ADMIN DASHBOARD API
-# =========================
-@app.get("/admin/stats")
-def stats():
-    db = SessionLocal()
     users = db.query(User).all()
 
     return {
-        "total_users": len(users),
-        "total_requests": sum(u.requests for u in users),
-        "total_revenue": sum(u.revenue for u in users)
+        "users": len(users),
+        "requests": sum(u.requests for u in users),
+        "revenue": sum(u.revenue for u in users)
     }

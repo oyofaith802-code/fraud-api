@@ -2,96 +2,56 @@ import streamlit as st
 import requests
 import matplotlib.pyplot as plt
 
-API = "https://fraud-api-1d91.onrender.com"
+API = "https://your-render-url.onrender.com"
 
-st.set_page_config(page_title="Fraud SaaS", layout="wide")
+st.set_page_config(layout="wide")
 
-# ================= SESSION =================
-if "api_key" not in st.session_state:
-    st.session_state.api_key = None
-if "email" not in st.session_state:
-    st.session_state.email = None
+# ================= LOGIN =================
+if "token" not in st.session_state:
+    st.title("🚀 Fraud SaaS V4")
 
-# ================= SAFE REQUEST =================
-def safe_post(url, **kwargs):
-    try:
-        r = requests.post(url, timeout=15, **kwargs)
-        return r.status_code, r.json() if "application/json" in r.headers.get("Content-Type","") else None
-    except:
-        return 500, None
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
 
-def safe_get(url, **kwargs):
-    try:
-        r = requests.get(url, timeout=15, **kwargs)
-        return r.status_code, r.json() if "application/json" in r.headers.get("Content-Type","") else None
-    except:
-        return 500, None
+    if st.button("Login"):
+        res = requests.post(f"{API}/login", params={
+            "email": email,
+            "password": password
+        }).json()
 
-# ================= LOGIN / SIGNUP =================
-if st.session_state.api_key is None:
-
-    st.title("🚀 Fraud SaaS")
-
-    tab1, tab2 = st.tabs(["Login", "Signup"])
-
-    with tab1:
-        email = st.text_input("Email")
-        password = st.text_input("Password", type="password")
-
-        if st.button("Login"):
-            status, res = safe_post(
-                f"{API}/login",
-                params={"email": email, "password": password}
-            )
-
-            if res and "api_key" in res:
-                st.session_state.api_key = res["api_key"]
-                st.session_state.email = email
-                st.success("Login success")
-                st.rerun()
-            else:
-                st.error("Login failed")
-
-    with tab2:
-        email = st.text_input("Email ", key="s1")
-        password = st.text_input("Password ", type="password", key="s2")
-
-        if st.button("Signup"):
-            status, res = safe_post(
-                f"{API}/signup",
-                params={"email": email, "password": password}
-            )
-
-            st.write(res)
+        st.session_state.token = res["token"]
+        st.rerun()
 
     st.stop()
 
-# ================= DASHBOARD =================
-st.title("💰 Fraud Dashboard")
+headers = {"Authorization": f"Bearer {st.session_state.token}"}
 
-status, data = safe_get(f"{API}/admin/stats")
+# ================= ANALYTICS =================
+analytics = requests.get(f"{API}/analytics", headers=headers).json()
 
-if not data:
-    st.error("Backend error")
-    st.stop()
+st.title("📊 Dashboard")
 
-col1, col2, col3 = st.columns(3)
+st.metric("Requests", analytics["total_requests"])
+st.metric("Avg Score", analytics["avg_score"])
 
-col1.metric("Users", data["total_users"])
-col2.metric("Requests", data["total_requests"])
-col3.metric("Revenue", data["total_revenue"])
+# ================= HEATMAP =================
+st.subheader("📈 Usage Heatmap")
 
-# ================= CHART =================
 fig, ax = plt.subplots()
-ax.bar(["Revenue", "Requests"], [data["total_revenue"], data["total_requests"]])
+
+scores = [x["score"] for x in analytics["heatmap"]]
+
+ax.plot(scores)
 st.pyplot(fig)
 
-# ================= API KEY =================
-st.subheader("API KEY")
-st.code(st.session_state.api_key)
+# ================= BILLING =================
+billing = requests.get(f"{API}/billing", headers=headers).json()
+
+st.subheader("🧾 Billing")
+st.write(billing)
 
 # ================= PREDICT =================
-st.subheader("Test Prediction")
+st.subheader("🧠 Fraud Prediction")
 
 v1 = st.number_input("V1")
 v2 = st.number_input("V2")
@@ -101,9 +61,9 @@ time = st.number_input("Time")
 
 if st.button("Predict"):
 
-    status, res = safe_post(
+    res = requests.post(
         f"{API}/predict",
-        headers={"x-api-key": st.session_state.api_key},
+        headers=headers,
         params={
             "V1": v1,
             "V2": v2,
@@ -111,22 +71,6 @@ if st.button("Predict"):
             "Amount": amount,
             "Time": time
         }
-    )
+    ).json()
 
     st.write(res)
-
-# ================= PAYSTACK =================
-plan = st.selectbox("Plan", ["daily", "monthly"])
-
-if st.button("Upgrade"):
-
-    status, res = safe_post(
-        f"{API}/paystack/pay",
-        params={
-            "email": st.session_state.email,
-            "plan": plan
-        }
-    )
-
-    if res:
-        st.write(res)

@@ -2,12 +2,12 @@ fastapi
 uvicorn
 sqlalchemy
 python-dotenv
+pyjwt
 numpy
-scikit-learn
 pandas
 joblib
+scikit-learn
 requests
-streamlit
 matplotlib
-psycopg2-binary
+streamlit
 xgboost
