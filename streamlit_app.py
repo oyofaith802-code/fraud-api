@@ -2,109 +2,79 @@ import streamlit as st
 import requests
 import matplotlib.pyplot as plt
 
-# ✅ YOUR REAL RENDER BACKEND
 API = "https://fraud-api-1d91.onrender.com"
 
 st.set_page_config(layout="wide")
 
-# =========================
-# 🔐 LOGIN SECTION
-# =========================
+# ---------------- LOGIN ----------------
 if "api_key" not in st.session_state:
 
     st.title("🔐 Fraud SaaS Login")
 
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
+    tab1, tab2 = st.tabs(["Login", "Signup"])
 
-    if st.button("Login"):
-        try:
-            res = requests.post(
-                f"{API}/login",
-                params={
-                    "email": email,
-                    "password": password
-                }
-            ).json()
+    with tab1:
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
+
+        if st.button("Login"):
+            res = requests.post(f"{API}/login", params={
+                "email": email,
+                "password": password
+            }).json()
 
             if "api_key" in res:
                 st.session_state.api_key = res["api_key"]
-                st.session_state.email = email
                 st.rerun()
             else:
-                st.error(res.get("error", "Login failed"))
+                st.error("Login failed")
 
-        except Exception as e:
-            st.error(f"API error: {e}")
+    with tab2:
+        email2 = st.text_input("Signup Email")
+        pass2 = st.text_input("Signup Password", type="password")
+
+        if st.button("Create Account"):
+            res = requests.post(f"{API}/signup", params={
+                "email": email2,
+                "password": pass2
+            }).json()
+
+            st.success(f"Account created: {res.get('api_key')}")
 
     st.stop()
 
 
-# =========================
-# 📊 DASHBOARD DATA
-# =========================
-try:
-    data = requests.get(
-        f"{API}/user/dashboard",
-        params={"api_key": st.session_state.api_key}
-    ).json()
-except Exception as e:
-    st.error(f"Failed to load data: {e}")
-    st.stop()
+# ---------------- DASHBOARD ----------------
+data = requests.get(
+    f"{API}/user/dashboard",
+    params={"api_key": st.session_state.api_key}
+).json()
 
+st.title("💰 Fraud Detection SaaS")
 
-st.title("💰 Fraud Detection SaaS Dashboard")
-
-# =========================
-# 📈 METRICS
-# =========================
 col1, col2, col3 = st.columns(3)
+col1.metric("Plan", data["plan"])
+col2.metric("Used", data["requests_used"])
+col3.metric("Remaining", data["remaining"])
 
-col1.metric("Plan", data.get("plan", "FREE"))
-col2.metric("Used Requests", data.get("requests_used", 0))
-col3.metric("Remaining", data.get("remaining", 0))
-
-
-# =========================
-# 📊 USAGE CHART
-# =========================
+# chart
 fig, ax = plt.subplots()
-
-ax.bar(
-    ["Used", "Remaining"],
-    [data.get("requests_used", 0), data.get("remaining", 0)]
-)
-
-ax.set_title("API Usage Overview")
-
+ax.bar(["Used", "Remaining"], [data["requests_used"], data["remaining"]])
 st.pyplot(fig)
 
+# API KEY
+st.subheader("API KEY")
+st.code(data["api_key"])
 
-# =========================
-# 🔑 API KEY SECTION
-# =========================
-st.subheader("🔑 API KEY")
-st.code(data.get("api_key", "N/A"))
+# ---------------- UPGRADE ----------------
+st.subheader("🚀 Upgrade")
 
+plan = st.selectbox("Choose plan", ["daily", "monthly"])
 
-# =========================
-# 🚀 UPGRADE BUTTON (PAYSTACK)
-# =========================
-st.subheader("💳 Upgrade Plan")
+if st.button("Pay with Paystack"):
+    res = requests.post(f"{API}/pay", params={
+        "email": data["email"],
+        "plan": plan
+    }).json()
 
-if st.button("🚀 Upgrade to PRO"):
-
-    try:
-        res = requests.post(
-            f"{API}/paystack/pay",
-            json={
-                "email": data.get("email"),
-                "plan": "pro"
-            }
-        ).json()
-
-        st.success("Payment initialized")
-        st.json(res)
-
-    except Exception as e:
-        st.error(f"Upgrade failed: {e}")
+    st.write(res)
