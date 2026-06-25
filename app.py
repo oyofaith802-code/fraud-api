@@ -36,27 +36,31 @@ def predict(data: Transaction, api_key: str = Header(None)):
 
     try:
         if api_key != API_KEY:
-            return {"error": "Unauthorized: Invalid API Key"}
+            return {"error": "Unauthorized"}
 
-        # STEP 1: convert to dict
-        input_dict = data.dict()
+        # FORCE CLEAN ORDER (MOST IMPORTANT FIX)
+        values = [
+            data.V1, data.V2, data.V3, data.V4, data.V5,
+            data.V6, data.V7, data.V8, data.V9, data.V10,
+            data.V11, data.V12, data.V13, data.V14, data.V15,
+            data.V16, data.V17, data.V18, data.V19, data.V20,
+            data.V21, data.V22, data.V23, data.V24, data.V25,
+            data.V26, data.V27, data.V28,
+            data.Amount, data.Time
+        ]
 
-        # STEP 2: FORCE correct column order
-        df = pd.DataFrame([[input_dict[col] for col in cols]], columns=cols)
+        df = pd.DataFrame([values], columns=cols)
 
-        # STEP 3: scale
         df_scaled = scaler.transform(df)
 
-        # STEP 4: predict
         rf_prob = rf_model.predict_proba(df_scaled)[0][1]
         xgb_prob = xgb_model.predict_proba(df_scaled)[0][1]
 
         fraud_score = (rf_prob + xgb_prob) / 2
-        status = "FRAUD" if fraud_score > 0.5 else "NORMAL"
 
         return {
             "fraud_score": float(fraud_score),
-            "status": status
+            "status": "FRAUD" if fraud_score > 0.5 else "NORMAL"
         }
 
     except Exception as e:
