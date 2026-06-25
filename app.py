@@ -43,13 +43,32 @@ class Transaction(BaseModel):
     Time: float
 
 
+@app.get("/check")
+def check():
+    return {
+        "api_key_loaded": API_KEY
+    }
+
+
 @app.post("/predict")
 def predict(data: Transaction, api_key: str = Header(None)):
 
     try:
-        if api_key != API_KEY:
-            return {"error": "Unauthorized"}
 
+        # Check API key
+        if not api_key:
+            return {
+                "error": "No API key provided"
+            }
+
+        if api_key.strip() != API_KEY.strip():
+            return {
+                "error": "Unauthorized",
+                "received": api_key,
+                "expected": API_KEY
+            }
+
+        # Convert input to ordered list
         values = [
             data.V1, data.V2, data.V3, data.V4, data.V5,
             data.V6, data.V7, data.V8, data.V9, data.V10,
@@ -60,19 +79,25 @@ def predict(data: Transaction, api_key: str = Header(None)):
             data.Amount, data.Time
         ]
 
+        # Convert to numpy array
         input_array = np.array(values).reshape(1, -1)
 
+        # Scale features
         scaled = scaler.transform(input_array)
 
+        # Model predictions
         rf_prob = rf_model.predict_proba(scaled)[0][1]
         xgb_prob = xgb_model.predict_proba(scaled)[0][1]
 
-        score = (rf_prob + xgb_prob) / 2
+        # Ensemble score
+        fraud_score = (rf_prob + xgb_prob) / 2
 
         return {
-            "fraud_score": float(score),
-            "status": "FRAUD" if score > 0.5 else "NORMAL"
+            "fraud_score": float(fraud_score),
+            "status": "FRAUD" if fraud_score > 0.5 else "NORMAL"
         }
 
     except Exception as e:
-        return {"error": str(e)}
+        return {
+            "error": str(e)
+        }
