@@ -1,35 +1,46 @@
 from fastapi import FastAPI, Header
+import os
+import uuid
 import joblib
 import numpy as np
-import os
 import requests
-import uuid
 from dotenv import load_dotenv
-import matplotlib.pyplot as plt
+
 from database import SessionLocal, User, init_db
 
+# -------------------------
+# INIT
+# -------------------------
 load_dotenv()
 init_db()
 
-app = FastAPI()
+app = FastAPI(title="Fraud API SaaS")
 
+# -------------------------
 # ENV
+# -------------------------
 API_KEY = os.getenv("API_KEY")
 PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY")
 BASE_URL = os.getenv("BASE_URL")
 
+# -------------------------
 # MODELS
+# -------------------------
 rf_model = joblib.load("rf_model.pkl")
 xgb_model = joblib.load("xgb_model.pkl")
 scaler = joblib.load("scaler.pkl")
 
+# -------------------------
+# HELPERS
+# -------------------------
+def get_user(api_key, db):
+    return db.query(User).filter(User.api_key == api_key).first()
 
 # -------------------------
-# CREATE USER (SIGNUP)
+# SIGNUP (CREATE USER)
 # -------------------------
 @app.post("/signup")
 def signup(email: str):
-
     db = SessionLocal()
 
     user = User(
@@ -44,6 +55,8 @@ def signup(email: str):
 
     db.add(user)
     db.commit()
+    db.refresh(user)
+    db.close()
 
     return {
         "email": email,
@@ -51,16 +64,8 @@ def signup(email: str):
         "plan": "FREE"
     }
 
-
 # -------------------------
-# GET USER
-# -------------------------
-def get_user(api_key, db):
-    return db.query(User).filter(User.api_key == api_key).first()
-
-
-# -------------------------
-# PREDICT (MONETIZED API)
+# FRAUD PREDICTION (SAAS CORE)
 # -------------------------
 @app.post("/predict")
 def predict(
@@ -79,10 +84,14 @@ def predict(
     user = get_user(api_key, db)
 
     if not user:
+        db.close()
         return {"error": "Invalid API key"}
 
     if user.requests >= user.limit:
-        return {"error": "Free limit reached"}
+        db.close()
+        return {
+            "error": "Free limit reached. Upgrade plan to continue."
+        }
 
     values = [
         V1,V2,V3,V4,V5,V6,V7,V8,V9,V10,
@@ -94,21 +103,24 @@ def predict(
     arr = np.array(values).reshape(1, -1)
     scaled = scaler.transform(arr)
 
-    score = (rf_model.predict_proba(scaled)[0][1] +
-             xgb_model.predict_proba(scaled)[0][1]) / 2
+    rf_prob = rf_model.predict_proba(scaled)[0][1]
+    xgb_prob = xgb_model.predict_proba(scaled)[0][1]
 
+    score = (rf_prob + xgb_prob) / 2
+
+    # UPDATE USAGE
     user.requests += 1
     db.commit()
+    db.close()
 
     return {
         "fraud_score": float(score),
         "status": "FRAUD" if score > 0.5 else "NORMAL",
-        "remaining": user.limit - user.requests
+        "remaining_calls": user.limit - user.requests
     }
 
-
 # -------------------------
-# PAYSTACK PAYMENT INIT
+# PAYSTACK INIT
 # -------------------------
 @app.post("/paystack/pay")
 def paystack_pay(email: str, plan: str):
@@ -137,7 +149,6 @@ def paystack_pay(email: str, plan: str):
     res = requests.post(url, json=data, headers=headers)
     return res.json()
 
-
 # -------------------------
 # PAYSTACK CALLBACK
 # -------------------------
@@ -165,22 +176,26 @@ def paystack_callback(reference: str):
             user.revenue += amount / 100
             db.commit()
 
+        db.close()
+
         return {"status": "success", "upgraded": True}
 
     return {"status": "failed"}
 
-
 # -------------------------
-# ADMIN STATS
+# ADMIN DASHBOARD STATS
 # -------------------------
 @app.get("/admin/stats")
-def stats():
+def admin_stats():
 
     db = SessionLocal()
     users = db.query(User).all()
 
-    return {
+    data = {
         "total_users": len(users),
         "total_requests": sum(u.requests for u in users),
         "total_revenue": sum(u.revenue for u in users)
     }
+
+    db.close()
+    return data

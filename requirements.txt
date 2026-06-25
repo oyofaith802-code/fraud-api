@@ -4,9 +4,9 @@ numpy
 pandas
 scikit-learn
 joblib
-python-dotenv
 requests
+python-dotenv
 sqlalchemy
 psycopg2-binary
-matplotlib
 streamlit
+matplotlib
