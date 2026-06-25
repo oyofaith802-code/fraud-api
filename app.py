@@ -1,40 +1,43 @@
 import os
 import uuid
 import numpy as np
-from fastapi import FastAPI, Header, HTTPException, Request
-from sqlalchemy import create_engine, Column, Integer, String, Float
-from sqlalchemy.orm import declarative_base, sessionmaker
-from dotenv import load_dotenv
 import joblib
 import requests
-from fastapi import FastAPI
 
-app = FastAPI()
-@app.get("/")
-def home():
-    return {"status": "Fraud API Running"}
+from fastapi import FastAPI, Header, HTTPException
+from sqlalchemy import create_engine, Column, String, Integer, Float
+from sqlalchemy.orm import declarative_base, sessionmaker
+from dotenv import load_dotenv
+
 # =========================
-# LOAD ENV
+# INIT
 # =========================
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL") or "sqlite:///./local.db"
 PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY")
-BASE_URL = os.getenv("BASE_URL")
-
-if not DATABASE_URL:
-    DATABASE_URL = "sqlite:///./local.db"  # fallback (NO crash)
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 
 # =========================
-# DB SETUP
+# APP
 # =========================
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
+app = FastAPI(title="Fraud SaaS API")
+
+@app.get("/")
+def home():
+    return {"status": "running", "service": "Fraud SaaS API"}
+
+# =========================
+# DB
+# =========================
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+)
+
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 
-# =========================
-# USER MODEL
-# =========================
 class User(Base):
     __tablename__ = "users"
 
@@ -45,61 +48,57 @@ class User(Base):
 
     plan = Column(String, default="FREE")
     requests = Column(Integer, default=0)
-    limit = Column(Integer, default=2)
+    limit = Column(Integer, default=3)
 
     revenue = Column(Float, default=0)
 
 Base.metadata.create_all(bind=engine)
 
 # =========================
-# APP
+# SAFE MODEL LOADING (NO CRASH)
 # =========================
-app = FastAPI(title="Fraud API SaaS")
+try:
+    rf_model = joblib.load("rf_model.pkl")
+    scaler = joblib.load("scaler.pkl")
+except Exception as e:
+    rf_model = None
+    scaler = None
+    print("⚠️ Model not loaded:", e)
 
 # =========================
-# LOAD MODEL (SAFE)
+# HELPERS
 # =========================
-rf_model = joblib.load("rf_model.pkl")
-scaler = joblib.load("scaler.pkl")
-
+def get_user(api_key: str):
+    db = SessionLocal()
+    return db.query(User).filter(User.api_key == api_key).first()
 
 # =========================
-# SIGNUP
+# AUTH
 # =========================
 @app.post("/signup")
 def signup(email: str, password: str):
-
     db = SessionLocal()
 
-    existing = db.query(User).filter(User.email == email).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="User already exists")
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=400, detail="User exists")
 
     user = User(
         id=str(uuid.uuid4()),
         email=email,
         password=password,
-        api_key="fk_" + uuid.uuid4().hex[:20],
+        api_key="fk_" + uuid.uuid4().hex[:24],
         plan="FREE",
-        requests=0,
-        limit=2
+        limit=3
     )
 
     db.add(user)
     db.commit()
 
-    return {
-        "message": "Account created",
-        "api_key": user.api_key
-    }
+    return {"message": "created", "api_key": user.api_key}
 
 
-# =========================
-# LOGIN
-# =========================
 @app.post("/login")
 def login(email: str, password: str):
-
     db = SessionLocal()
 
     user = db.query(User).filter(
@@ -116,17 +115,8 @@ def login(email: str, password: str):
         "requests": user.requests
     }
 
-
 # =========================
-# GET USER
-# =========================
-def get_user(api_key: str):
-    db = SessionLocal()
-    return db.query(User).filter(User.api_key == api_key).first()
-
-
-# =========================
-# PREDICT (CLEAN + STABLE)
+# PREDICTION API
 # =========================
 @app.post("/predict")
 def predict(
@@ -134,21 +124,21 @@ def predict(
     Amount: float, Time: float,
     api_key: str = Header(None)
 ):
-
     user = get_user(api_key)
 
     if not user:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     if user.requests >= user.limit:
-        return {
-            "error": "Limit reached. Please upgrade."
-        }
+        return {"error": "limit reached"}
 
-    values = np.array([[V1, V2, V3, Amount, Time]])
-    scaled = scaler.transform(values)
+    if not rf_model or not scaler:
+        return {"error": "model not available"}
 
-    score = rf_model.predict_proba(scaled)[0][1]
+    X = np.array([[V1, V2, V3, Amount, Time]])
+    X = scaler.transform(X)
+
+    score = rf_model.predict_proba(X)[0][1]
 
     user.requests += 1
 
@@ -162,19 +152,18 @@ def predict(
         "remaining": user.limit - user.requests
     }
 
-
 # =========================
-# PAYSTACK INIT
+# PAYSTACK PAYMENT
 # =========================
 @app.post("/paystack/pay")
 def paystack_pay(email: str, plan: str):
 
-    plan_prices = {
+    prices = {
         "daily": 2000,
         "monthly": 10000
     }
 
-    amount = plan_prices.get(plan, 2000) * 100
+    amount = prices.get(plan, 2000) * 100
 
     res = requests.post(
         "https://api.paystack.co/transaction/initialize",
@@ -191,9 +180,8 @@ def paystack_pay(email: str, plan: str):
 
     return res.json()
 
-
 # =========================
-# PAYSTACK WEBHOOK (AUTO UPGRADE)
+# PAYSTACK CALLBACK (AUTO UPGRADE)
 # =========================
 @app.get("/paystack/callback")
 def callback(reference: str):
@@ -221,13 +209,11 @@ def callback(reference: str):
 
     return {"status": "failed"}
 
-
 # =========================
-# ADMIN STATS
+# ADMIN DASHBOARD API
 # =========================
 @app.get("/admin/stats")
 def stats():
-
     db = SessionLocal()
     users = db.query(User).all()
 
