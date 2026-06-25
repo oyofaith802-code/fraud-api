@@ -1,96 +1,93 @@
 import streamlit as st
 import requests
 
-API = "https://fraud-api-1d91.onrender.com"
-
-st.set_page_config(page_title="Fraud SaaS V3", layout="centered")
+API_URL = "https://fraud-api-1d91.onrender.com"
 
 st.title("🚀 Fraud SaaS Dashboard V3")
 
-menu = st.sidebar.selectbox("Menu", ["Login", "Signup", "Dashboard"])
+menu = st.sidebar.selectbox("Menu", ["Login / Signup", "Dashboard"])
 
-# =====================
-# SIGNUP
-# =====================
-if menu == "Signup":
+# ================= AUTH =================
+if menu == "Login / Signup":
+
     email = st.text_input("Email")
     password = st.text_input("Password", type="password")
 
-    if st.button("Create Account"):
-        res = requests.post(f"{API}/signup", params={
-            "email": email,
-            "password": password
-        })
+    col1, col2 = st.columns(2)
 
-        try:
-            st.success(res.json())
-        except:
-            st.error(res.text)
+    with col1:
+        if st.button("Signup"):
 
+            res = requests.post(
+                f"{API_URL}/signup",
+                params={"email": email, "password": password}
+            )
 
-# =====================
-# LOGIN
-# =====================
-if menu == "Login":
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
+            try:
+                data = res.json()
+                if "api_key" in data:
+                    st.session_state.api_key = data["api_key"]
+                    st.success("Account created")
+                else:
+                    st.error(data)
+            except:
+                st.error(res.text)
 
-    if st.button("Login"):
-        res = requests.post(f"{API}/login", params={
-            "email": email,
-            "password": password
-        })
+    with col2:
+        if st.button("Login"):
 
-        try:
-            data = res.json()
+            res = requests.post(
+                f"{API_URL}/login",
+                params={"email": email, "password": password}
+            )
 
-            if "api_key" in data:
-                st.session_state["api_key"] = data["api_key"]
-                st.success("Login successful")
-            else:
-                st.error(data)
+            try:
+                data = res.json()
+                if "api_key" in data:
+                    st.session_state.api_key = data["api_key"]
+                    st.success("Login successful")
+                else:
+                    st.error(data)
+            except:
+                st.error(res.text)
 
-        except:
-            st.error(res.text)
-
-
-# =====================
-# DASHBOARD
-# =====================
+# ================= DASHBOARD =================
 if menu == "Dashboard":
 
     if "api_key" not in st.session_state:
-        st.warning("Login first")
+        st.warning("Please login first")
         st.stop()
 
     st.success("💰 SaaS Dashboard")
 
-    api_key = st.session_state["api_key"]
-
-    st.write("API KEY:", api_key)
-
-    st.subheader("🧪 Test Prediction (30 Features)")
+    st.write("API KEY:", st.session_state.api_key)
 
     features = []
 
-    for i in range(30):
-        features.append(st.number_input(f"V{i+1}", value=0.0))
+    st.subheader("🧪 30 Feature Input")
 
-    amount = st.number_input("Amount", 0.0)
-    time = st.number_input("Time", 0.0)
+    for i in range(1, 31):
+        features.append(st.number_input(f"V{i}", value=0.0))
 
-    features[28] = amount
-    features[29] = time
+    amount = st.number_input("Amount", value=0.0)
+    time = st.number_input("Time", value=0.0)
 
-    if st.button("Predict Fraud"):
+    if st.button("Predict"):
+
+        payload = {
+            "features": features + [amount, time]
+        }
 
         res = requests.post(
-            f"{API}/predict",
-            json={"features": features},
-            headers={"api_key": api_key}
+            f"{API_URL}/predict",
+            json=payload,
+            headers={"api_key": st.session_state.api_key}
         )
 
         try:
             st.json(res.json())
         except:
-            st.error(res.text)
+            st.error({
+                "error": "Prediction failed",
+                "raw": res.text
+            })
