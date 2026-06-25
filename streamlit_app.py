@@ -1,76 +1,134 @@
 import streamlit as st
 import requests
-import matplotlib.pyplot as plt
 
-API = "https://your-render-url.onrender.com"
+# =========================
+# CONFIG
+# =========================
+API = "https://fraud-api-1d91.onrender.com"
 
-st.set_page_config(layout="wide")
+st.set_page_config(page_title="Fraud SaaS", layout="wide")
 
-# ================= LOGIN =================
-if "token" not in st.session_state:
-    st.title("🚀 Fraud SaaS V4")
 
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
+# =========================
+# SAFE JSON
+# =========================
+def safe_json(res):
+    try:
+        return res.json()
+    except:
+        return {"error": res.text}
 
-    if st.button("Login"):
-        res = requests.post(f"{API}/login", params={
-            "email": email,
-            "password": password
-        }).json()
 
-        st.session_state.token = res["token"]
-        st.rerun()
+# =========================
+# SESSION
+# =========================
+if "api_key" not in st.session_state:
+    st.session_state.api_key = None
+
+
+# =========================
+# AUTH PAGE
+# =========================
+if not st.session_state.api_key:
+
+    st.title("🚀 Fraud SaaS V1")
+
+    tab1, tab2 = st.tabs(["Login", "Signup"])
+
+    # LOGIN
+    with tab1:
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Password", type="password", key="login_pass")
+
+        if st.button("Login"):
+            res = safe_json(requests.post(f"{API}/login", params={
+                "email": email,
+                "password": password
+            }))
+
+            if "api_key" in res:
+                st.session_state.api_key = res["api_key"]
+                st.success("Login successful")
+                st.rerun()
+            else:
+                st.error(res)
+
+    # SIGNUP
+    with tab2:
+        email = st.text_input("Email", key="signup_email")
+        password = st.text_input("Password", type="password", key="signup_pass")
+
+        if st.button("Create Account"):
+            res = safe_json(requests.post(f"{API}/signup", params={
+                "email": email,
+                "password": password
+            }))
+
+            if "api_key" in res:
+                st.success("Account created")
+                st.code(res["api_key"])
+            else:
+                st.error(res)
 
     st.stop()
 
-headers = {"Authorization": f"Bearer {st.session_state.token}"}
 
-# ================= ANALYTICS =================
-analytics = requests.get(f"{API}/analytics", headers=headers).json()
+# =========================
+# DASHBOARD
+# =========================
+st.title("💰 Fraud Detection SaaS Dashboard")
 
-st.title("📊 Dashboard")
+api_key = st.session_state.api_key
 
-st.metric("Requests", analytics["total_requests"])
-st.metric("Avg Score", analytics["avg_score"])
 
-# ================= HEATMAP =================
-st.subheader("📈 Usage Heatmap")
+# =========================
+# STATS
+# =========================
+stats = safe_json(requests.get(f"{API}/admin/stats"))
 
-fig, ax = plt.subplots()
+if "error" not in stats:
+    col1, col2, col3 = st.columns(3)
 
-scores = [x["score"] for x in analytics["heatmap"]]
+    col1.metric("Users", stats["total_users"])
+    col2.metric("Requests", stats["total_requests"])
+    col3.metric("Revenue", stats["total_revenue"])
 
-ax.plot(scores)
-st.pyplot(fig)
 
-# ================= BILLING =================
-billing = requests.get(f"{API}/billing", headers=headers).json()
+# =========================
+# PREDICTION
+# =========================
+st.subheader("🧪 Fraud Prediction")
 
-st.subheader("🧾 Billing")
-st.write(billing)
+c1, c2 = st.columns(2)
 
-# ================= PREDICT =================
-st.subheader("🧠 Fraud Prediction")
+with c1:
+    V1 = st.number_input("V1")
+    V2 = st.number_input("V2")
+    V3 = st.number_input("V3")
 
-v1 = st.number_input("V1")
-v2 = st.number_input("V2")
-v3 = st.number_input("V3")
-amount = st.number_input("Amount")
-time = st.number_input("Time")
+with c2:
+    Amount = st.number_input("Amount")
+    Time = st.number_input("Time")
 
 if st.button("Predict"):
-
-    res = requests.post(
+    res = safe_json(requests.post(
         f"{API}/predict",
-        headers=headers,
+        headers={"api-key": api_key},
         params={
-            "V1": v1,
-            "V2": v2,
-            "V3": v3,
-            "Amount": amount,
-            "Time": time
+            "V1": V1,
+            "V2": V2,
+            "V3": V3,
+            "Amount": Amount,
+            "Time": Time
         }
-    ).json()
+    ))
 
     st.write(res)
+
+
+# =========================
+# LOGOUT
+# =========================
+if st.button("Logout"):
+    st.session_state.api_key = None
+    st.rerun()
