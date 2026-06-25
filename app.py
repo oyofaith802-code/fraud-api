@@ -7,7 +7,12 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from dotenv import load_dotenv
 import joblib
 import requests
+from fastapi import FastAPI
 
+app = FastAPI()
+@app.get("/")
+def home():
+    return {"status": "Fraud API Running"}
 # =========================
 # LOAD ENV
 # =========================
