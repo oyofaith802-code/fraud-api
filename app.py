@@ -1,39 +1,66 @@
 import os
 import uuid
-import random
 import numpy as np
+from fastapi import FastAPI, Header, HTTPException, Request
+from sqlalchemy import create_engine, Column, Integer, String, Float
+from sqlalchemy.orm import declarative_base, sessionmaker
+from dotenv import load_dotenv
 import joblib
 import requests
 
-from fastapi import FastAPI, Header
-from dotenv import load_dotenv
-
-from database import SessionLocal, User, init_db
-
-# ---------------- INIT ----------------
+# =========================
+# LOAD ENV
+# =========================
 load_dotenv()
-init_db()
 
-app = FastAPI()
-
-# ---------------- ENV ----------------
-PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY")
+DATABASE_URL = os.getenv("DATABASE_URL")
+PAYSTACK_SECRET = os.getenv("PAYSTACK_SECRET_KEY")
 BASE_URL = os.getenv("BASE_URL")
 
-# ---------------- MODELS ----------------
+if not DATABASE_URL:
+    DATABASE_URL = "sqlite:///./local.db"  # fallback (NO crash)
+
+# =========================
+# DB SETUP
+# =========================
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
+SessionLocal = sessionmaker(bind=engine)
+Base = declarative_base()
+
+# =========================
+# USER MODEL
+# =========================
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True)
+    email = Column(String, unique=True)
+    password = Column(String)
+    api_key = Column(String, unique=True)
+
+    plan = Column(String, default="FREE")
+    requests = Column(Integer, default=0)
+    limit = Column(Integer, default=2)
+
+    revenue = Column(Float, default=0)
+
+Base.metadata.create_all(bind=engine)
+
+# =========================
+# APP
+# =========================
+app = FastAPI(title="Fraud API SaaS")
+
+# =========================
+# LOAD MODEL (SAFE)
+# =========================
 rf_model = joblib.load("rf_model.pkl")
 scaler = joblib.load("scaler.pkl")
 
-try:
-    xgb_model = joblib.load("xgb_model.pkl")
-    HAS_XGB = True
-except:
-    HAS_XGB = False
 
-
-# =========================================================
-# SIGNUP (creates account + sends verification code)
-# =========================================================
+# =========================
+# SIGNUP
+# =========================
 @app.post("/signup")
 def signup(email: str, password: str):
 
@@ -41,58 +68,30 @@ def signup(email: str, password: str):
 
     existing = db.query(User).filter(User.email == email).first()
     if existing:
-        return {"error": "User already exists"}
-
-    code = random.randint(100000, 999999)
+        raise HTTPException(status_code=400, detail="User already exists")
 
     user = User(
         id=str(uuid.uuid4()),
         email=email,
         password=password,
         api_key="fk_" + uuid.uuid4().hex[:20],
-        verification_code=code,
-        verified=0,
         plan="FREE",
         requests=0,
-        limit=2,
-        revenue=0
+        limit=2
     )
 
     db.add(user)
     db.commit()
 
-    # TEMP EMAIL (replace with SendGrid later)
-    print(f"EMAIL VERIFICATION CODE FOR {email}: {code}")
-
     return {
-        "message": "Signup successful. Check email for verification code"
+        "message": "Account created",
+        "api_key": user.api_key
     }
 
 
-# =========================================================
-# VERIFY EMAIL
-# =========================================================
-@app.post("/verify")
-def verify(email: str, code: int):
-
-    db = SessionLocal()
-    user = db.query(User).filter(User.email == email).first()
-
-    if not user:
-        return {"error": "User not found"}
-
-    if user.verification_code != code:
-        return {"error": "Invalid verification code"}
-
-    user.verified = 1
-    db.commit()
-
-    return {"status": "Email verified successfully"}
-
-
-# =========================================================
+# =========================
 # LOGIN
-# =========================================================
+# =========================
 @app.post("/login")
 def login(email: str, password: str):
 
@@ -104,20 +103,26 @@ def login(email: str, password: str):
     ).first()
 
     if not user:
-        return {"error": "Invalid credentials"}
-
-    if user.verified == 0:
-        return {"error": "Email not verified"}
+        raise HTTPException(status_code=401, detail="Invalid login")
 
     return {
         "api_key": user.api_key,
-        "plan": user.plan
+        "plan": user.plan,
+        "requests": user.requests
     }
 
 
-# =========================================================
-# FRAUD PREDICTION API (MAIN PRODUCT)
-# =========================================================
+# =========================
+# GET USER
+# =========================
+def get_user(api_key: str):
+    db = SessionLocal()
+    return db.query(User).filter(User.api_key == api_key).first()
+
+
+# =========================
+# PREDICT (CLEAN + STABLE)
+# =========================
 @app.post("/predict")
 def predict(
     V1: float, V2: float, V3: float,
@@ -125,32 +130,25 @@ def predict(
     api_key: str = Header(None)
 ):
 
-    db = SessionLocal()
-
-    user = db.query(User).filter(User.api_key == api_key).first()
+    user = get_user(api_key)
 
     if not user:
-        return {"error": "Invalid API key"}
-
-    if user.verified == 0:
-        return {"error": "Email not verified"}
+        raise HTTPException(status_code=401, detail="Invalid API key")
 
     if user.requests >= user.limit:
-        return {"error": "Free limit reached. Upgrade required"}
+        return {
+            "error": "Limit reached. Please upgrade."
+        }
 
-    # MODEL INPUT
-    arr = np.array([[V1, V2, V3, Amount, Time]])
-    scaled = scaler.transform(arr)
+    values = np.array([[V1, V2, V3, Amount, Time]])
+    scaled = scaler.transform(values)
 
-    rf_score = rf_model.predict_proba(scaled)[0][1]
-
-    if HAS_XGB:
-        xgb_score = xgb_model.predict_proba(scaled)[0][1]
-        score = (rf_score + xgb_score) / 2
-    else:
-        score = rf_score
+    score = rf_model.predict_proba(scaled)[0][1]
 
     user.requests += 1
+
+    db = SessionLocal()
+    db.merge(user)
     db.commit()
 
     return {
@@ -160,55 +158,50 @@ def predict(
     }
 
 
-# =========================================================
-# PAYSTACK PAYMENT INIT (DAILY / MONTHLY)
-# =========================================================
+# =========================
+# PAYSTACK INIT
+# =========================
 @app.post("/paystack/pay")
 def paystack_pay(email: str, plan: str):
 
-    prices = {
-        "daily": 500,
-        "monthly": 5000
+    plan_prices = {
+        "daily": 2000,
+        "monthly": 10000
     }
 
-    amount = prices.get(plan, 5000) * 100
+    amount = plan_prices.get(plan, 2000) * 100
 
-    url = "https://api.paystack.co/transaction/initialize"
-
-    headers = {
-        "Authorization": f"Bearer {PAYSTACK_SECRET_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    data = {
-        "email": email,
-        "amount": amount,
-        "callback_url": f"{BASE_URL}/paystack/callback"
-    }
-
-    res = requests.post(url, json=data, headers=headers)
+    res = requests.post(
+        "https://api.paystack.co/transaction/initialize",
+        headers={
+            "Authorization": f"Bearer {PAYSTACK_SECRET}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "email": email,
+            "amount": amount,
+            "callback_url": f"{BASE_URL}/paystack/callback"
+        }
+    )
 
     return res.json()
 
 
-# =========================================================
-# PAYSTACK CALLBACK (AUTO UPGRADE)
-# =========================================================
+# =========================
+# PAYSTACK WEBHOOK (AUTO UPGRADE)
+# =========================
 @app.get("/paystack/callback")
 def callback(reference: str):
 
-    url = f"https://api.paystack.co/transaction/verify/{reference}"
-
-    headers = {
-        "Authorization": f"Bearer {PAYSTACK_SECRET_KEY}"
-    }
-
-    res = requests.get(url, headers=headers).json()
+    res = requests.get(
+        f"https://api.paystack.co/transaction/verify/{reference}",
+        headers={"Authorization": f"Bearer {PAYSTACK_SECRET}"}
+    ).json()
 
     if res["data"]["status"] == "success":
 
         email = res["data"]["customer"]["email"]
-        amount = res["data"]["amount"]
+        amount = res["data"]["amount"] / 100
 
         db = SessionLocal()
         user = db.query(User).filter(User.email == email).first()
@@ -216,19 +209,19 @@ def callback(reference: str):
         if user:
             user.plan = "PRO"
             user.limit = 1000
-            user.revenue += amount / 100
+            user.revenue += amount
             db.commit()
 
-        return {"status": "UPGRADED"}
+        return {"status": "upgraded"}
 
-    return {"status": "FAILED"}
+    return {"status": "failed"}
 
 
-# =========================================================
-# ADMIN DASHBOARD STATS
-# =========================================================
+# =========================
+# ADMIN STATS
+# =========================
 @app.get("/admin/stats")
-def admin():
+def stats():
 
     db = SessionLocal()
     users = db.query(User).all()
