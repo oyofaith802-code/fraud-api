@@ -1,19 +1,20 @@
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header
 import joblib
-import numpy as np   
-from fastapi import FastAPI
-from pydantic import BaseModel
+import numpy as np
 import pandas as pd
-API_KEY = "my_secret_12345"
+from pydantic import BaseModel
+
 app = FastAPI()
-rf_model = joblib.load("model.pkl")
-model.predict(...)   
+
+API_KEY = "my_secret_12345"
+
+# Load models
 rf_model = joblib.load("rf_model.pkl")
 xgb_model = joblib.load("xgb_model.pkl")
 scaler = joblib.load("scaler.pkl")
 
 
-# Input schema
+# Input schema (IMPORTANT for correct feature order)
 class Transaction(BaseModel):
     V1: float
     V2: float
@@ -48,41 +49,25 @@ class Transaction(BaseModel):
 
 
 @app.post("/predict")
-def predict(data: dict, api_key: str = Header(None)):
+def predict(data: Transaction, api_key: str = Header(None)):
 
     try:
-        # API key check (optional but recommended)
-        if api_key != "my_secret_12345":
+        # API KEY CHECK
+        if api_key != API_KEY:
             return {"error": "Unauthorized: Invalid API Key"}
 
-        # convert input to numpy
-        input_data = np.array([list(data.values())])
+        # Convert input to DataFrame (VERY IMPORTANT for feature order)
+        df = pd.DataFrame([data.dict()])
 
-        # prediction
-        prediction = model.predict(input_data)
-        score = model.predict_proba(input_data)[0][1]
-
-        return {
-            "fraud_score": float(score),
-            "status": "FRAUD" if prediction[0] == 1 else "NORMAL"
-        }
-
-    except Exception as e:
-        return {"error": str(e)}
-
-        # Create DataFrame with exact column order
-        features = pd.DataFrame(values, columns=cols)
-
-        # Scale input
-        features_scaled = scaler.transform(features)
+        # Scale
+        df_scaled = scaler.transform(df)
 
         # Predictions
-        rf_prob = rf_model.predict_proba(features_scaled)[0][1]
-        xgb_prob = xgb_model.predict_proba(features_scaled)[0][1]
+        rf_prob = rf_model.predict_proba(df_scaled)[0][1]
+        xgb_prob = xgb_model.predict_proba(df_scaled)[0][1]
 
-        # Ensemble score
+        # Ensemble
         fraud_score = (rf_prob + xgb_prob) / 2
-
         status = "FRAUD" if fraud_score > 0.5 else "NORMAL"
 
         return {
