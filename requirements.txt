@@ -8,3 +8,5 @@ python-dotenv
 requests
 sqlalchemy
 psycopg2-binary
+matplotlib
+streamlit
