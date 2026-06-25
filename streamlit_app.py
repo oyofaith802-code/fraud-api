@@ -1,198 +1,143 @@
 import streamlit as st
 import requests
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 
-# =========================
+API_URL = "https://fraud-api-1d91.onrender.com"
 
-# CONFIG
+st.set_page_config(page_title="Fraud SaaS V6", layout="wide")
 
-# =========================
+st.title("🚀 Fraud SaaS Dashboard V6")
 
-API_URL = "https://fraud-api-1d91.onrender.com/predict"
-STATS_URL = "https://fraud-api-1d91.onrender.com/stats"
+# ======================
+# SESSION
+# ======================
+if "api_key" not in st.session_state:
+    st.session_state.api_key = None
 
-st.set_page_config(
-page_title="Fraud SaaS Dashboard V5",
-layout="wide"
-)
 
-st.title("🚀 Fraud SaaS Dashboard V5")
+# ======================
+# LOGIN / SIGNUP
+# ======================
+menu = st.sidebar.selectbox("Menu", ["Login / Signup", "Dashboard"])
 
-# =========================
+if menu == "Login / Signup":
 
-# SESSION STATE
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
 
-# =========================
+    col1, col2 = st.columns(2)
 
-if "history" not in st.session_state:
-st.session_state.history = []
-
-# =========================
-
-# API KEY
-
-# =========================
-
-st.sidebar.header("🔑 API Configuration")
-api_key = st.sidebar.text_input("Enter API Key", type="default")
-
-st.sidebar.markdown("---")
-st.sidebar.info("Use your key from /signup endpoint")
-
-# =========================
-
-# FEATURE INPUTS
-
-# =========================
-
-st.subheader("🧪 Transaction Input (Kaggle Format)")
-
-st.write("Enter V1 - V28 + Amount + Time (30 features total)")
-
-features = []
-
-cols = st.columns(3)
-
-for i in range(28):
-with cols[i % 3]:
-v = st.number_input(f"V{i+1}", value=0.0, step=0.01)
-features.append(v)
-
-amount = st.number_input("Amount", value=0.0, step=0.01)
-time = st.number_input("Time", value=0.0, step=0.01)
-
-features.append(amount)
-features.append(time)
-
-# =========================
-
-# PREDICT BUTTON
-
-# =========================
-
-if st.button("🚀 Predict Fraud"):
-
-```
-if not api_key:
-    st.error("Please enter API key")
-else:
-    try:
-        headers = {
-            "X-API-Key": api_key
-        }
-
-        payload = {
-            "features": features
-        }
-
-        response = requests.post(API_URL, json=payload, headers=headers)
-
-        try:
-            data = response.json()
-        except:
-            st.error("Server returned invalid response")
-            st.code(response.text)
-            st.stop()
-
-        if "error" in data:
-            st.error(data["error"])
-        else:
-            score = data["fraud_score"]
-            status = data["status"]
-
-            st.success(f"Fraud Score: {score:.4f}")
-            st.info(f"Prediction: {status}")
-
-            # =========================
-            # EXPLANATION ENGINE
-            # =========================
-            st.subheader("🧠 Explanation")
-
-            if score > 0.7:
-                st.error("🔴 High Risk Transaction")
-                st.write("- Very strong anomaly detected")
-                st.write("- Pattern deviates from normal behavior")
-                st.write("- Likely fraud attempt")
-
-            elif score > 0.3:
-                st.warning("🟡 Medium Risk Transaction")
-                st.write("- Some unusual patterns detected")
-                st.write("- Requires review")
-
-            else:
-                st.success("🟢 Low Risk Transaction")
-                st.write("- Normal transaction pattern")
-                st.write("- No suspicious signals")
-
-            # =========================
-            # SAVE HISTORY
-            # =========================
-            st.session_state.history.append({
-                "score": score,
-                "status": status
+    with col1:
+        if st.button("Login"):
+            res = requests.post(f"{API_URL}/login", params={
+                "email": email,
+                "password": password
             })
 
-    except Exception as e:
-        st.error(f"Request failed: {str(e)}")
-```
+            try:
+                data = res.json()
+                if "api_key" in data:
+                    st.session_state.api_key = data["api_key"]
+                    st.success("Login successful")
+                else:
+                    st.error(data)
+            except:
+                st.error("Server error")
 
-# =========================
+    with col2:
+        if st.button("Signup"):
+            res = requests.post(f"{API_URL}/signup", params={
+                "email": email,
+                "password": password
+            })
 
-# DASHBOARD ANALYTICS
+            try:
+                st.success(res.json())
+            except:
+                st.error("Signup failed")
 
-# =========================
 
-st.divider()
-st.header("📊 Analytics Dashboard")
+# ======================
+# DASHBOARD
+# ======================
+if menu == "Dashboard":
 
-if len(st.session_state.history) > 0:
+    if not st.session_state.api_key:
+        st.warning("Please login first")
+        st.stop()
 
-```
-df = pd.DataFrame(st.session_state.history)
+    st.success(f"API KEY: {st.session_state.api_key}")
 
-total = len(df)
-fraud = len(df[df["status"] == "FRAUD"])
-normal = len(df[df["status"] == "NORMAL"])
+    st.subheader("🧪 Prediction (30 Features)")
 
-col1, col2, col3 = st.columns(3)
+    features = []
+    cols = st.columns(5)
 
-col1.metric("Total Predictions", total)
-col2.metric("Fraud Cases", fraud)
-col3.metric("Normal Cases", normal)
+    for i in range(30):
+        with cols[i % 5]:
+            features.append(st.number_input(f"V{i+1}", value=0.0))
 
-# =========================
-# SCORE TREND
-# =========================
-st.subheader("📈 Fraud Score Trend")
+    if st.button("Predict Fraud"):
 
-st.line_chart(df["score"])
+        payload = {"features": features}
 
-# =========================
-# PIE CHART SAFE VERSION
-# =========================
-st.subheader("📊 Fraud Distribution")
+        res = requests.post(
+            f"{API_URL}/predict",
+            json=payload,
+            headers={"X-API-Key": st.session_state.api_key}
+        )
 
-if fraud + normal > 0:
+        try:
+            data = res.json()
+            st.json(data)
+
+            if "fraud_score" in data:
+
+                st.subheader("📊 Result Explanation")
+
+                score = data["fraud_score"]
+
+                if score > 0.7:
+                    st.error("🚨 HIGH FRAUD RISK")
+                    explanation = "Model detected strong anomaly patterns."
+                elif score > 0.3:
+                    st.warning("⚠️ MEDIUM RISK")
+                    explanation = "Some unusual behavior detected."
+                else:
+                    st.success("✅ LOW RISK")
+                    explanation = "Transaction looks normal."
+
+                st.write(explanation)
+
+        except:
+            st.error("Invalid JSON response")
+
+
+    # ======================
+    # ANALYTICS
+    # ======================
+    st.subheader("📊 Analytics")
+
+    stats = requests.get(
+        f"{API_URL}/stats",
+        params={"api_key": st.session_state.api_key}
+    ).json()
+
+    st.write(stats)
+
+    fraud = stats.get("fraud_cases", 0)
+    normal = stats.get("normal_cases", 0)
+
     fig, ax = plt.subplots()
 
-    ax.pie(
-        [fraud, normal],
-        labels=["Fraud", "Normal"],
-        autopct="%1.1f%%"
-    )
+    if fraud == 0 and normal == 0:
+        ax.text(0.5, 0.5, "No data yet", ha="center")
+    else:
+        ax.pie(
+            [fraud, normal],
+            labels=["Fraud", "Normal"],
+            autopct="%1.1f%%"
+        )
 
     st.pyplot(fig)
-else:
-    st.info("No data yet")
-
-# =========================
-# RAW DATA
-# =========================
-st.subheader("📄 Prediction History")
-st.dataframe(df)
-```
-
-else:
-st.info("Run predictions to generate analytics")

@@ -1,171 +1,200 @@
-import streamlit as st
-import requests
+import os
+import uuid
 import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
+from datetime import datetime
 
-API_URL = "https://fraud-api-1d91.onrender.com/predict"
-STATS_URL = "https://fraud-api-1d91.onrender.com/stats"
+from fastapi import FastAPI, Header
+from sqlalchemy import create_engine, Column, String, Integer, Float, DateTime
+from sqlalchemy.orm import declarative_base, sessionmaker
+from dotenv import load_dotenv
+import joblib
 
-st.set_page_config(
-page_title="Fraud SaaS Dashboard V5",
-layout="wide"
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./local.db")
+
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
 )
 
-st.title("🚀 Fraud SaaS Dashboard V5")
+SessionLocal = sessionmaker(bind=engine)
+Base = declarative_base()
 
-# =========================
+app = FastAPI(title="Fraud SaaS V6")
 
-# SESSION STATE
+# ======================
+# TABLES
+# ======================
+class User(Base):
+    __tablename__ = "users"
 
-# =========================
+    id = Column(String, primary_key=True)
+    email = Column(String, unique=True)
+    password = Column(String)
+    api_key = Column(String, unique=True)
+    requests = Column(Integer, default=0)
+    limit = Column(Integer, default=50)
 
-if "history" not in st.session_state:
-st.session_state.history = []
 
-# =========================
+class FraudHistory(Base):
+    __tablename__ = "fraud_history"
 
-# API KEY INPUT
+    id = Column(String, primary_key=True)
+    api_key = Column(String)
+    score = Column(Float)
+    status = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
-# =========================
 
-api_key = st.text_input("🔑 API Key")
+class UsageLog(Base):
+    __tablename__ = "usage_logs"
 
-st.divider()
+    id = Column(String, primary_key=True)
+    api_key = Column(String)
+    endpoint = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
-# =========================
 
-# FEATURE INPUTS (30 FEATURES)
+Base.metadata.create_all(bind=engine)
 
-# =========================
+# ======================
+# MODEL
+# ======================
+rf_model = joblib.load("rf_model.pkl")
+scaler = joblib.load("scaler.pkl")
 
-st.subheader("🧪 Transaction Features (V1 - V28 + Amount + Time)")
 
-features = []
+def db():
+    return SessionLocal()
 
-cols = st.columns(3)
 
-for i in range(30):
-with cols[i % 3]:
-value = st.number_input(f"F{i+1}", value=0.0, step=0.01)
-features.append(value)
+def get_user(api_key: str):
+    session = db()
+    user = session.query(User).filter(User.api_key == api_key).first()
+    session.close()
+    return user
 
-# =========================
 
-# PREDICTION BUTTON
+# ======================
+# HOME
+# ======================
+@app.get("/")
+def home():
+    return {"status": "Fraud SaaS V6 running"}
 
-# =========================
 
-if st.button("Predict Fraud Risk"):
+# ======================
+# SIGNUP
+# ======================
+@app.post("/signup")
+def signup(email: str, password: str):
+    session = db()
 
-```
-if not api_key:
-    st.error("API key required")
-else:
+    if session.query(User).filter(User.email == email).first():
+        session.close()
+        return {"error": "User exists"}
+
+    user = User(
+        id=str(uuid.uuid4()),
+        email=email,
+        password=password,
+        api_key="fk_" + uuid.uuid4().hex[:20]
+    )
+
+    session.add(user)
+    session.commit()
+    session.close()
+
+    return {"api_key": user.api_key}
+
+
+# ======================
+# LOGIN
+# ======================
+@app.post("/login")
+def login(email: str, password: str):
+    session = db()
+    user = session.query(User).filter(User.email == email).first()
+    session.close()
+
+    if not user or user.password != password:
+        return {"error": "Invalid login"}
+
+    return {"api_key": user.api_key}
+
+
+# ======================
+# PREDICT (FIXED 30 FEATURES)
+# ======================
+@app.post("/predict")
+def predict(payload: dict, api_key: str = Header(None, alias="X-API-Key")):
+
+    user = get_user(api_key)
+
+    if not user:
+        return {"error": "Invalid API key"}
+
+    features = payload.get("features")
+
+    if not features or len(features) != 30:
+        return {"error": "Need 30 features"}
+
     try:
-        headers = {
-            "X-API-Key": api_key
+        arr = np.array([features], dtype=float)
+        scaled = scaler.transform(arr)
+
+        score = rf_model.predict_proba(scaled)[0][1]
+        status = "FRAUD" if score > 0.5 else "NORMAL"
+
+        session = db()
+        user.requests += 1
+        session.merge(user)
+
+        session.add(FraudHistory(
+            id=str(uuid.uuid4()),
+            api_key=api_key,
+            score=float(score),
+            status=status
+        ))
+
+        session.add(UsageLog(
+            id=str(uuid.uuid4()),
+            api_key=api_key,
+            endpoint="/predict"
+        ))
+
+        session.commit()
+        session.close()
+
+        return {
+            "fraud_score": float(score),
+            "status": status,
+            "remaining": user.limit - user.requests
         }
-
-        payload = {
-            "features": features
-        }
-
-        res = requests.post(API_URL, json=payload, headers=headers)
-
-        try:
-            data = res.json()
-        except:
-            st.error("Server returned invalid response")
-            st.write(res.text)
-            st.stop()
-
-        if "error" in data:
-            st.error(data["error"])
-        else:
-            score = data["fraud_score"]
-            status = data["status"]
-
-            st.success(f"Score: {score:.4f}")
-            st.info(f"Status: {status}")
-
-            if status == "FRAUD":
-                st.error("""
-```
-
-High Risk Transaction
-
-Possible reasons:
-
-* Suspicious pattern detected
-* Outlier behavior
-* High anomaly score
-  """)
-  else:
-  st.success("""
-  Low Risk Transaction
-
-Possible reasons:
-
-* Normal spending pattern
-* No anomaly detected
-  """)
-
-  ```
-            st.session_state.history.append({
-                "score": score,
-                "status": status
-            })
 
     except Exception as e:
-        st.error(str(e))
-  ```
+        return {"error": str(e)}
 
-# =========================
 
-# DASHBOARD ANALYTICS
+# ======================
+# STATS
+# ======================
+@app.get("/stats")
+def stats(api_key: str):
 
-# =========================
+    session = db()
 
-st.divider()
-st.header("📊 Dashboard Analytics")
+    usage = session.query(UsageLog).filter(UsageLog.api_key == api_key).all()
+    history = session.query(FraudHistory).filter(FraudHistory.api_key == api_key).all()
 
-if len(st.session_state.history) > 0:
+    session.close()
 
-```
-df = pd.DataFrame(st.session_state.history)
+    fraud = len([h for h in history if h.status == "FRAUD"])
+    normal = len([h for h in history if h.status == "NORMAL"])
 
-total = len(df)
-fraud = len(df[df["status"] == "FRAUD"])
-normal = len(df[df["status"] == "NORMAL"])
-
-col1, col2, col3 = st.columns(3)
-
-col1.metric("Total Predictions", total)
-col2.metric("Fraud Cases", fraud)
-col3.metric("Normal Cases", normal)
-
-# =========================
-# LINE CHART
-# =========================
-st.subheader("📈 Risk Score Trend")
-st.line_chart(df["score"])
-
-# =========================
-# PIE CHART (FIXED ZERO ERROR)
-# =========================
-st.subheader("📊 Distribution")
-
-labels = ["Fraud", "Normal"]
-values = [fraud, normal]
-
-if sum(values) > 0:
-    fig, ax = plt.subplots()
-    ax.pie(values, labels=labels, autopct="%1.1f%%")
-    st.pyplot(fig)
-else:
-    st.info("No data yet")
-```
-
-else:
-st.info("Run predictions to see analytics")
+    return {
+        "total_requests": len(usage),
+        "fraud_cases": fraud,
+        "normal_cases": normal
+    }
