@@ -3,6 +3,8 @@ from pydantic import BaseModel
 import pandas as pd
 import joblib
 import pandas as pd
+from fastapi import FastAPI, Header, HTTPException
+API_KEY = "my_secret_12345"
 app = FastAPI()
 
 # Load models
@@ -49,33 +51,20 @@ class Transaction(BaseModel):
 def home():
     return {"message": "Fraud Detection API is running"}
 @app.post("/predict")
-def predict(data: Transaction):
+def predict(data: Transaction, api_key: str = Header(None)):
+    
+    if api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized: Invalid API Key")
+
     try:
-        import numpy as np
+        input_data = np.array([list(data.dict().values())])
+        scaled_data = scaler.transform(input_data)
 
-        features = np.array([[
-            data.V1, data.V2, data.V3, data.V4, data.V5,
-            data.V6, data.V7, data.V8, data.V9, data.V10,
-            data.V11, data.V12, data.V13, data.V14, data.V15,
-            data.V16, data.V17, data.V18, data.V19, data.V20,
-            data.V21, data.V22, data.V23, data.V24, data.V25,
-            data.V26, data.V27, data.V28, data.Amount, data.Time
-        ]])
-
-        # SCALE (NO COLUMN NAMES)
-        features_scaled = scaler.transform(features)
-
-        # PREDICTION
-        rf_prob = rf_model.predict_proba(features_scaled)[0][1]
-        xgb_prob = xgb_model.predict_proba(features_scaled)[0][1]
-
-        fraud_score = (rf_prob + xgb_prob) / 2
-
-        status = "FRAUD" if fraud_score > 0.5 else "NORMAL"
+        prediction = model.predict_proba(scaled_data)[0][1]
 
         return {
-            "fraud_score": float(fraud_score),
-            "status": status
+            "fraud_score": float(prediction),
+            "status": "FRAUD" if prediction > 0.5 else "NORMAL"
         }
 
     except Exception as e:
