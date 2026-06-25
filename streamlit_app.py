@@ -4,45 +4,90 @@ import numpy as np
 
 API_URL = "https://fraud-api-1d91.onrender.com"
 
+st.set_page_config(page_title="Fraud SaaS V3", layout="centered")
+
 st.title("🚀 Fraud SaaS Dashboard V3")
 
 # =========================
-# LOGIN SECTION
+# SESSION STATE
 # =========================
 if "api_key" not in st.session_state:
+    st.session_state.api_key = None
 
-    st.subheader("Login")
+
+# =========================
+# LOGIN / SIGNUP PAGE
+# =========================
+if st.session_state.api_key is None:
+
+    st.subheader("Login / Signup")
 
     email = st.text_input("Email")
     password = st.text_input("Password", type="password")
 
-    if st.button("Login"):
+    col1, col2 = st.columns(2)
 
-        res = requests.post(
-            f"{API_URL}/login",
-            params={"email": email, "password": password}
-        )
+    # =========================
+    # LOGIN
+    # =========================
+    with col1:
+        if st.button("Login"):
 
-        data = res.json()
+            try:
+                res = requests.post(
+                    f"{API_URL}/login",
+                    params={
+                        "email": email,
+                        "password": password
+                    }
+                )
 
-        if "api_key" in data:
-            st.session_state.api_key = data["api_key"]
-            st.success("Login successful")
-        else:
-            st.error(data)
+                data = res.json()
+
+                if "api_key" in data:
+                    st.session_state.api_key = data["api_key"]
+                    st.success("Login successful 🚀")
+                    st.rerun()
+                else:
+                    st.error(data)
+
+            except Exception as e:
+                st.error(str(e))
+
+
+    # =========================
+    # SIGNUP
+    # =========================
+    with col2:
+        if st.button("Signup"):
+
+            try:
+                res = requests.post(
+                    f"{API_URL}/signup",
+                    params={
+                        "email": email,
+                        "password": password
+                    }
+                )
+
+                st.success(res.json())
+
+            except Exception as e:
+                st.error(str(e))
+
 
 # =========================
 # DASHBOARD
 # =========================
 else:
 
-    st.subheader("💰 SaaS Dashboard")
+    st.subheader("💰 SaaS Fraud Dashboard")
 
-    st.write("API Key:")
+    st.write("Your API Key:")
     st.code(st.session_state.api_key)
 
     # =========================
-    # INPUTS (ONLY USER FRIENDLY)
+    # INPUTS (USER FRIENDLY)
     # =========================
     v1 = st.number_input("V1", value=0.0)
     v2 = st.number_input("V2", value=0.0)
@@ -54,9 +99,9 @@ else:
     # =========================
     # BUILD FULL 30 FEATURES
     # =========================
-    auto_features = [0.0] * 25  # fills V4–V28
+    v_rest = [0.0] * 25  # V4–V28
 
-    features = [v1, v2, v3] + auto_features + [time, amount]
+    features = [v1, v2, v3] + v_rest + [time, amount]
 
     features = np.array([features], dtype=float)
 
@@ -65,13 +110,28 @@ else:
     # =========================
     if st.button("Predict Fraud"):
 
-        res = requests.post(
-            f"{API_URL}/predict",
-            json={"features": features.tolist()},
-            headers={"api-key": st.session_state.api_key}
-        )
-
         try:
-            st.json(res.json())
-        except:
-            st.error(res.text)
+            res = requests.post(
+                f"{API_URL}/predict",
+                json={
+                    "features": features.tolist()
+                },
+                headers={
+                    "api-key": st.session_state.api_key
+                }
+            )
+
+            data = res.json()
+            st.json(data)
+
+        except Exception as e:
+            st.error(str(e))
+
+
+# =========================
+# LOGOUT
+# =========================
+if st.session_state.api_key:
+    if st.button("Logout"):
+        st.session_state.api_key = None
+        st.rerun()
