@@ -72,15 +72,22 @@ if menu == "Dashboard":
     col3.metric("Normal Cases", stats["normal_cases"])
 
     # ======================
-    # PIE CHART
-    # ======================
+    total = fraud + normal
+
+if total > 0:
+
     fig, ax = plt.subplots()
+
     ax.pie(
-        [stats["fraud_cases"], stats["normal_cases"]],
+        [fraud, normal],
         labels=["Fraud", "Normal"],
         autopct="%1.1f%%"
     )
+
     st.pyplot(fig)
+
+else:
+    st.warning("No predictions yet. Run a prediction first.")
 
     # ======================
     # PREDICTION INPUT
