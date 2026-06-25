@@ -6,8 +6,8 @@ from pydantic import BaseModel
 import pandas as pd
 API_KEY = "my_secret_12345"
 app = FastAPI()
-
-# Load models
+rf_model = joblib.load("model.pkl")
+model.predict(...)   
 rf_model = joblib.load("rf_model.pkl")
 xgb_model = joblib.load("xgb_model.pkl")
 scaler = joblib.load("scaler.pkl")
@@ -47,24 +47,24 @@ class Transaction(BaseModel):
     Time: float
 
 
-@app.get("/")
-def home():
-    return {"message": "Fraud Detection API is running"}
 @app.post("/predict")
-def predict(data: Transaction, api_key: str = Header(None)):
-    
-    if api_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Unauthorized: Invalid API Key")
+def predict(data: dict, api_key: str = Header(None)):
 
     try:
-        input_data = np.array([list(data.dict().values())])
-        scaled_data = scaler.transform(input_data)
+        # API key check (optional but recommended)
+        if api_key != "my_secret_12345":
+            return {"error": "Unauthorized: Invalid API Key"}
 
-        prediction = model.predict_proba(scaled_data)[0][1]
+        # convert input to numpy
+        input_data = np.array([list(data.values())])
+
+        # prediction
+        prediction = model.predict(input_data)
+        score = model.predict_proba(input_data)[0][1]
 
         return {
-            "fraud_score": float(prediction),
-            "status": "FRAUD" if prediction > 0.5 else "NORMAL"
+            "fraud_score": float(score),
+            "status": "FRAUD" if prediction[0] == 1 else "NORMAL"
         }
 
     except Exception as e:
