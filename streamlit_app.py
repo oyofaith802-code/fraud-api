@@ -1,107 +1,80 @@
 import streamlit as st
 import requests
-import pandas as pd
-import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Fraud Analytics Dashboard", layout="wide")
+# -------------------------
+# CONFIG
+# -------------------------
+API_URL = "https://fraud-api-1d91.onrender.com/admin/stats"
 
-API_URL = "https://fraud-api-1d91.onrender.com/predict"
-API_KEY = "my_secret_12345"
+# -------------------------
+# ADMIN LOGIN
+# -------------------------
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "admin123"
 
-st.title("🏦 Fraud Detection Analytics Dashboard")
+st.title("💰 Fraud API Admin Dashboard")
 
-# SESSION STORAGE
-if "history" not in st.session_state:
-    st.session_state.history = []
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
 
-# ---------------- INPUT ----------------
-st.subheader("🔎 New Transaction Analysis")
 
-with st.form("form"):
-    cols = st.columns(4)
+def login():
+    st.subheader("Admin Login")
 
-    feature_names = [
-        "V1","V2","V3","V4","V5","V6","V7","V8",
-        "V9","V10","V11","V12","V13","V14","V15","V16",
-        "V17","V18","V19","V20","V21","V22","V23","V24",
-        "V25","V26","V27","V28","Amount","Time"
-    ]
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
 
-    data = {}
+    if st.button("Login"):
+        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+            st.session_state.logged_in = True
+            st.success("Login successful")
+            st.rerun()
+        else:
+            st.error("Invalid credentials")
 
-    for i, name in enumerate(feature_names):
-        data[name] = cols[i % 4].number_input(name, value=0.0)
 
-    submitted = st.form_submit_button("Analyze")
+# -------------------------
+# DASHBOARD
+# -------------------------
+def dashboard():
 
-# ---------------- API CALL ----------------
-if submitted:
-    headers = {"api-key": API_KEY}
-    res = requests.post(API_URL, json=data, headers=headers)
-    result = res.json()
+    st.sidebar.success("Logged in as Admin")
 
-    if "error" in result:
-        st.error(result["error"])
-    else:
-        score = result["fraud_score"]
-        status = result["status"]
+    if st.sidebar.button("Logout"):
+        st.session_state.logged_in = False
+        st.rerun()
 
-        # save history
-        st.session_state.history.append({
-            "score": score,
-            "status": status
-        })
+    st.subheader("📊 System Overview")
 
-        st.success("Analysis Complete")
+    try:
+        data = requests.get(API_URL).json()
 
         col1, col2, col3 = st.columns(3)
 
-        col1.metric("Fraud Score", f"{score:.4f}")
-        col2.metric("Status", status)
+        col1.metric("Total Users", data["total_users"])
+        col2.metric("Total Requests", data["total_requests"])
+        col3.metric("Revenue ($)", data["total_revenue"])
 
-        if score < 0.3:
-            col3.success("LOW RISK")
-        elif score < 0.7:
-            col3.warning("MEDIUM RISK")
-        else:
-            col3.error("HIGH RISK")
+        st.divider()
 
-        st.progress(float(score))
+        st.subheader("📈 Live Stats")
 
-# ---------------- ANALYTICS ----------------
-st.subheader("📊 Analytics Overview")
+        st.line_chart({
+            "Users": [data["total_users"]],
+            "Requests": [data["total_requests"]],
+            "Revenue": [data["total_revenue"]]
+        })
 
-history = st.session_state.history
+        st.success("System Running Smoothly 🚀")
 
-if len(history) > 0:
+    except Exception as e:
+        st.error(f"Error fetching data: {e}")
 
-    df = pd.DataFrame(history)
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.metric("Total Transactions", len(df))
-        st.metric("Fraud Detected", (df["status"] == "FRAUD").sum())
-
-    with col2:
-        fraud_rate = (df["status"] == "FRAUD").mean() * 100
-        st.metric("Fraud Rate %", f"{fraud_rate:.2f}%")
-
-    # ---------------- CHART 1 ----------------
-    st.subheader("📈 Fraud vs Normal Distribution")
-
-    fig1, ax1 = plt.subplots()
-    df["status"].value_counts().plot(kind="bar", ax=ax1)
-    ax1.set_ylabel("Count")
-    st.pyplot(fig1)
-
-    # ---------------- CHART 2 ----------------
-    st.subheader("📉 Fraud Score Distribution")
-
-    fig2, ax2 = plt.subplots()
-    ax2.hist(df["score"], bins=10)
-    ax2.set_xlabel("Fraud Score")
-    st.pyplot(fig2)
-
+# -------------------------
+# APP FLOW
+# -------------------------
+if not st.session_state.logged_in:
+    login()
 else:
-    st.info("No transactions yet. Run a prediction to see analytics.")
+    dashboard()

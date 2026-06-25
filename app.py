@@ -5,7 +5,7 @@ import os
 import requests
 import uuid
 from dotenv import load_dotenv
-
+import matplotlib.pyplot as plt
 from database import SessionLocal, User, init_db
 
 load_dotenv()
