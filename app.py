@@ -3,6 +3,12 @@ import joblib
 import pandas as pd
 from pydantic import BaseModel
 import numpy as np
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+API_KEY = os.getenv("API_KEY")
 
 app = FastAPI()
 
@@ -44,7 +50,6 @@ def predict(data: Transaction, api_key: str = Header(None)):
         if api_key != API_KEY:
             return {"error": "Unauthorized"}
 
-        # convert to strict ordered list
         values = [
             data.V1, data.V2, data.V3, data.V4, data.V5,
             data.V6, data.V7, data.V8, data.V9, data.V10,
@@ -55,13 +60,10 @@ def predict(data: Transaction, api_key: str = Header(None)):
             data.Amount, data.Time
         ]
 
-        # 🔥 IMPORTANT FIX: use numpy (NO feature names)
         input_array = np.array(values).reshape(1, -1)
 
-        # scale
         scaled = scaler.transform(input_array)
 
-        # predict
         rf_prob = rf_model.predict_proba(scaled)[0][1]
         xgb_prob = xgb_model.predict_proba(scaled)[0][1]
 
