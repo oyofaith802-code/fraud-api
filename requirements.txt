@@ -6,7 +6,9 @@ numpy
 requests
 joblib
 scikit-learn
-psycopg2-binary
-PyJWT
 pandas
+PyJWT
 matplotlib
+passlib[bcrypt]
+python-multipart
+slowapi
