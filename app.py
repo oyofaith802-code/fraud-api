@@ -1,68 +1,32 @@
-import os
 import uuid
 import numpy as np
 from fastapi import FastAPI, HTTPException, Header
-from sqlalchemy import create_engine, Column, String, Integer, Float
-from sqlalchemy.orm import declarative_base, sessionmaker
-from dotenv import load_dotenv
+from database import engine, SessionLocal, Base
+from models import User
 import joblib
 
 # =========================
-# LOAD ENV
+# APP INIT
 # =========================
-load_dotenv()
-
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./local.db")
+app = FastAPI(title="Fraud SaaS V3 Clean")
 
 # =========================
-# DB SETUP
+# CREATE TABLES
 # =========================
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
-)
-
-SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
-Base = declarative_base()
-
-# =========================
-# USER MODEL
-# =========================
-class User(Base):
-    __tablename__ = "users"
-
-    id = Column(String, primary_key=True)
-    email = Column(String, unique=True, index=True)
-    password = Column(String)
-
-    api_key = Column(String, unique=True, index=True)
-
-    plan = Column(String, default="FREE")
-    requests = Column(Integer, default=0)
-    limit = Column(Integer, default=5)
-
-    revenue = Column(Float, default=0.0)
-
-
 Base.metadata.create_all(bind=engine)
-
-# =========================
-# APP
-# =========================
-app = FastAPI(title="Fraud SaaS API V3")
-
-@app.get("/")
-def home():
-    return {
-        "status": "Fraud SaaS Running",
-        "version": "v3"
-    }
 
 # =========================
 # LOAD ML MODEL
 # =========================
 rf_model = joblib.load("rf_model.pkl")
 scaler = joblib.load("scaler.pkl")
+
+# =========================
+# HOME
+# =========================
+@app.get("/")
+def home():
+    return {"status": "Fraud SaaS Running", "version": "v3"}
 
 # =========================
 # DB SESSION
@@ -88,6 +52,7 @@ def get_user(api_key: str):
 def signup(email: str, password: str):
 
     db = SessionLocal()
+
     try:
         user = db.query(User).filter(User.email == email).first()
 
@@ -123,6 +88,7 @@ def signup(email: str, password: str):
 def login(email: str, password: str):
 
     db = SessionLocal()
+
     try:
         user = db.query(User).filter(User.email == email).first()
 
@@ -132,8 +98,7 @@ def login(email: str, password: str):
         return {
             "api_key": user.api_key,
             "plan": user.plan,
-            "requests": user.requests,
-            "limit": user.limit
+            "requests": user.requests
         }
 
     finally:
@@ -155,9 +120,7 @@ def predict(
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     if user.requests >= user.limit:
-        return {
-            "error": "Limit reached. Upgrade plan required."
-        }
+        return {"error": "Limit reached. Upgrade required."}
 
     values = np.array([[V1, V2, V3, Amount, Time]])
     scaled = scaler.transform(values)
@@ -186,6 +149,7 @@ def predict(
 def stats():
 
     db = SessionLocal()
+
     try:
         users = db.query(User).all()
 
