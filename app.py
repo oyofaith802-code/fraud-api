@@ -35,24 +35,22 @@ class Transaction(BaseModel):
 def predict(data: Transaction, api_key: str = Header(None)):
 
     try:
-        # API KEY CHECK
         if api_key != API_KEY:
             return {"error": "Unauthorized: Invalid API Key"}
 
-        # Convert to DataFrame (IMPORTANT)
-        df = pd.DataFrame([data.dict()])
+        # STEP 1: convert to dict
+        input_dict = data.dict()
 
-        # FORCE correct column order
-        df = df[cols]
+        # STEP 2: FORCE correct column order
+        df = pd.DataFrame([[input_dict[col] for col in cols]], columns=cols)
 
-        # Scale
+        # STEP 3: scale
         df_scaled = scaler.transform(df)
 
-        # Predictions
+        # STEP 4: predict
         rf_prob = rf_model.predict_proba(df_scaled)[0][1]
         xgb_prob = xgb_model.predict_proba(df_scaled)[0][1]
 
-        # Ensemble
         fraud_score = (rf_prob + xgb_prob) / 2
         status = "FRAUD" if fraud_score > 0.5 else "NORMAL"
 
