@@ -80,26 +80,34 @@ def signup(email: str, password: str):
 
     db = SessionLocal()
 
-    if db.query(User).filter(User.email == email).first():
-        raise HTTPException(status_code=400, detail="User already exists")
+    try:
+        existing = db.query(User).filter(User.email == email).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="User already exists")
 
-    user = User(
-        id=str(uuid.uuid4()),
-        email=email,
-        password=password,
-        api_key="fk_" + uuid.uuid4().hex[:20],
-        plan="FREE",
-        requests=0,
-        limit=2
-    )
+        user = User(
+            id=str(uuid.uuid4()),
+            email=email,
+            password=password,
+            api_key="fk_" + uuid.uuid4().hex[:20],
+            plan="FREE",
+            requests=0,
+            limit=2
+        )
 
-    db.add(user)
-    db.commit()
+        db.add(user)
+        db.commit()
 
-    return {
-        "message": "Account created",
-        "api_key": user.api_key
-    }
+        return {
+            "message": "Account created",
+            "api_key": user.api_key
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+    finally:
+        db.close()
 
 
 # =========================
@@ -110,19 +118,23 @@ def login(email: str, password: str):
 
     db = SessionLocal()
 
-    user = db.query(User).filter(
-        User.email == email,
-        User.password == password
-    ).first()
+    try:
+        user = db.query(User).filter(User.email == email).first()
 
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid login")
+        if not user or user.password != password:
+            raise HTTPException(status_code=401, detail="Invalid login")
 
-    return {
-        "api_key": user.api_key,
-        "plan": user.plan,
-        "requests": user.requests
-    }
+        return {
+            "api_key": user.api_key,
+            "plan": user.plan,
+            "requests": user.requests
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+    finally:
+        db.close()
 
 
 # =========================
