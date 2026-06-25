@@ -6,19 +6,17 @@ from sqlalchemy import create_engine, Column, String, Integer, Float
 from sqlalchemy.orm import declarative_base, sessionmaker
 from dotenv import load_dotenv
 import joblib
-from fastapi import Header
-api_key: str = Header(None)
 
-# ======================
+# =========================
 # LOAD ENV
-# ======================
+# =========================
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./local.db")
 
-# ======================
+# =========================
 # DB SETUP
-# ======================
+# =========================
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
@@ -27,9 +25,9 @@ engine = create_engine(
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 
-# ======================
+# =========================
 # USER MODEL
-# ======================
+# =========================
 class User(Base):
     __tablename__ = "users"
 
@@ -40,53 +38,63 @@ class User(Base):
 
     plan = Column(String, default="FREE")
     requests = Column(Integer, default=0)
-    limit = Column(Integer, default=2)
+    limit = Column(Integer, default=5)
     revenue = Column(Float, default=0.0)
+
 
 Base.metadata.create_all(bind=engine)
 
-# ======================
+# =========================
 # APP
-# ======================
+# =========================
 app = FastAPI(title="Fraud SaaS V3")
+
 
 @app.get("/")
 def home():
-    return {"status": "Fraud SaaS API Running"}
+    return {"status": "Fraud SaaS Running V3"}
 
-# ======================
-# RESET DB (DEBUG ONLY)
-# ======================
+
+# =========================
+# RESET DB (DEV ONLY)
+# =========================
 @app.get("/reset-db")
 def reset_db():
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     return {"status": "db reset done"}
 
-# ======================
-# LOAD ML MODEL
-# ======================
+
+# =========================
+# LOAD MODEL
+# =========================
 rf_model = joblib.load("rf_model.pkl")
 scaler = joblib.load("scaler.pkl")
 
-# ======================
-# HELPERS
-# ======================
-def get_user(api_key: str):
-    db = SessionLocal()
-    return db.query(User).filter(User.api_key == api_key).first()
 
-# ======================
+# =========================
+# DB HELPERS
+# =========================
+def get_user_by_key(api_key: str):
+    db = SessionLocal()
+    try:
+        return db.query(User).filter(User.api_key == api_key).first()
+    finally:
+        db.close()
+
+
+# =========================
 # SIGNUP
-# ======================
+# =========================
 @app.post("/signup")
 def signup(email: str, password: str):
+
     db = SessionLocal()
 
     try:
         existing = db.query(User).filter(User.email == email).first()
         if existing:
-            return {"error": "User already exists"}
+            raise HTTPException(status_code=400, detail="User already exists")
 
         user = User(
             id=str(uuid.uuid4()),
@@ -106,24 +114,23 @@ def signup(email: str, password: str):
             "api_key": user.api_key
         }
 
-    except Exception as e:
-        return {"error": str(e)}
-
     finally:
         db.close()
 
-# ======================
+
+# =========================
 # LOGIN
-# ======================
+# =========================
 @app.post("/login")
 def login(email: str, password: str):
+
     db = SessionLocal()
 
     try:
         user = db.query(User).filter(User.email == email).first()
 
         if not user or user.password != password:
-            return {"error": "Invalid credentials"}
+            raise HTTPException(status_code=401, detail="Invalid login")
 
         return {
             "api_key": user.api_key,
@@ -131,57 +138,60 @@ def login(email: str, password: str):
             "requests": user.requests
         }
 
-    except Exception as e:
-        return {"error": str(e)}
-
     finally:
         db.close()
 
-# ======================
-# PREDICT (SAFE VERSION)
-# ======================
+
+# =========================
+# PREDICT (FIXED AUTH)
+# =========================
 @app.post("/predict")
 def predict(
-    V1: float, V2: float, V3: float,
-    Amount: float, Time: float,
-    api_key: str = Header(None)
+    V1: float,
+    V2: float,
+    V3: float,
+    Amount: float,
+    Time: float,
+    api_key: str = Header(None, alias="api-key")
 ):
 
+    user = get_user_by_key(api_key)
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    if user.requests >= user.limit:
+        return {"error": "Limit reached. Upgrade plan"}
+
+    values = np.array([[V1, V2, V3, Amount, Time]])
+    scaled = scaler.transform(values)
+
+    score = rf_model.predict_proba(scaled)[0][1]
+
+    # update usage
+    db = SessionLocal()
     try:
-        user = get_user(api_key)
-
-        if not user:
-            return {"error": "Invalid API key"}
-
-        if user.requests >= user.limit:
-            return {"error": "Limit reached"}
-
-        X = np.array([[V1, V2, V3, Amount, Time]])
-        X_scaled = scaler.transform(X)
-
-        score = rf_model.predict_proba(X_scaled)[0][1]
-
         user.requests += 1
-
-        db = SessionLocal()
         db.merge(user)
         db.commit()
+    finally:
+        db.close()
 
-        return {
-            "fraud_score": float(score),
-            "status": "FRAUD" if score > 0.5 else "NORMAL",
-            "remaining": user.limit - user.requests
-        }
+    return {
+        "fraud_score": float(score),
+        "status": "FRAUD" if score > 0.5 else "NORMAL",
+        "remaining": user.limit - user.requests
+    }
 
-    except Exception as e:
-        return {"error": "Prediction failed", "details": str(e)}
 
-# ======================
+# =========================
 # STATS
-# ======================
+# =========================
 @app.get("/admin/stats")
 def stats():
+
     db = SessionLocal()
+
     users = db.query(User).all()
 
     return {
