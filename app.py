@@ -1,9 +1,9 @@
+from fastapi import FastAPI, Header, HTTPException
+import joblib
+import numpy as np   
 from fastapi import FastAPI
 from pydantic import BaseModel
 import pandas as pd
-import joblib
-import pandas as pd
-from fastapi import FastAPI, Header, HTTPException
 API_KEY = "my_secret_12345"
 app = FastAPI()
 
