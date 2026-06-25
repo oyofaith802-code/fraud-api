@@ -1,134 +1,89 @@
 import streamlit as st
 import requests
 
-# =========================
-# CONFIG
-# =========================
-API = "https://fraud-api-1d91.onrender.com"
+API = "https://your-api.onrender.com"
 
-st.set_page_config(page_title="Fraud SaaS", layout="wide")
+st.title("🚀 Fraud SaaS V3 Dashboard")
 
-
-# =========================
-# SAFE JSON
-# =========================
-def safe_json(res):
-    try:
-        return res.json()
-    except:
-        return {"error": res.text}
-
-
-# =========================
-# SESSION
-# =========================
 if "api_key" not in st.session_state:
     st.session_state.api_key = None
 
 
-# =========================
-# AUTH PAGE
-# =========================
-if not st.session_state.api_key:
+# ---------------- LOGIN ----------------
+if st.session_state.api_key is None:
 
-    st.title("🚀 Fraud SaaS V1")
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
 
-    tab1, tab2 = st.tabs(["Login", "Signup"])
+    col1, col2 = st.columns(2)
 
-    # LOGIN
-    with tab1:
-        email = st.text_input("Email", key="login_email")
-        password = st.text_input("Password", type="password", key="login_pass")
-
+    with col1:
         if st.button("Login"):
-            res = safe_json(requests.post(f"{API}/login", params={
+
+            res = requests.post(f"{API}/login", params={
                 "email": email,
                 "password": password
-            }))
+            })
 
-            if "api_key" in res:
-                st.session_state.api_key = res["api_key"]
+            try:
+                data = res.json()
+            except:
+                st.error(res.text)
+                st.stop()
+
+            if "api_key" in data:
+                st.session_state.api_key = data["api_key"]
                 st.success("Login successful")
                 st.rerun()
             else:
-                st.error(res)
+                st.error(data)
 
-    # SIGNUP
-    with tab2:
-        email = st.text_input("Email", key="signup_email")
-        password = st.text_input("Password", type="password", key="signup_pass")
+    with col2:
+        if st.button("Signup"):
 
-        if st.button("Create Account"):
-            res = safe_json(requests.post(f"{API}/signup", params={
+            res = requests.post(f"{API}/signup", params={
                 "email": email,
                 "password": password
-            }))
+            })
 
-            if "api_key" in res:
-                st.success("Account created")
-                st.code(res["api_key"])
-            else:
-                st.error(res)
+            st.write(res.json())
 
     st.stop()
 
 
-# =========================
-# DASHBOARD
-# =========================
-st.title("💰 Fraud Detection SaaS Dashboard")
+# ---------------- DASHBOARD ----------------
+st.success("Logged in")
 
 api_key = st.session_state.api_key
 
+st.subheader("Test Prediction")
 
-# =========================
-# STATS
-# =========================
-stats = safe_json(requests.get(f"{API}/admin/stats"))
-
-if "error" not in stats:
-    col1, col2, col3 = st.columns(3)
-
-    col1.metric("Users", stats["total_users"])
-    col2.metric("Requests", stats["total_requests"])
-    col3.metric("Revenue", stats["total_revenue"])
-
-
-# =========================
-# PREDICTION
-# =========================
-st.subheader("🧪 Fraud Prediction")
-
-c1, c2 = st.columns(2)
-
-with c1:
-    V1 = st.number_input("V1")
-    V2 = st.number_input("V2")
-    V3 = st.number_input("V3")
-
-with c2:
-    Amount = st.number_input("Amount")
-    Time = st.number_input("Time")
+v1 = st.number_input("V1")
+v2 = st.number_input("V2")
+v3 = st.number_input("V3")
+amount = st.number_input("Amount")
+time = st.number_input("Time")
 
 if st.button("Predict"):
-    res = safe_json(requests.post(
+
+    res = requests.post(
         f"{API}/predict",
         headers={"api-key": api_key},
         params={
-            "V1": V1,
-            "V2": V2,
-            "V3": V3,
-            "Amount": Amount,
-            "Time": Time
+            "V1": v1,
+            "V2": v2,
+            "V3": v3,
+            "Amount": amount,
+            "Time": time
         }
-    ))
+    )
 
-    st.write(res)
+    try:
+        st.write(res.json())
+    except:
+        st.error(res.text)
 
 
-# =========================
-# LOGOUT
-# =========================
 if st.button("Logout"):
     st.session_state.api_key = None
     st.rerun()
