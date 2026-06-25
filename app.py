@@ -6,6 +6,8 @@ from sqlalchemy import create_engine, Column, String, Integer, Float
 from sqlalchemy.orm import declarative_base, sessionmaker
 from dotenv import load_dotenv
 import joblib
+from fastapi import Header
+api_key: str = Header(None)
 
 # ======================
 # LOAD ENV
