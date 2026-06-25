@@ -2,23 +2,30 @@ from fastapi import FastAPI, Header
 import joblib
 import numpy as np
 from pydantic import BaseModel
-import os
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
-
-API_KEY = os.getenv("API_KEY")
 
 app = FastAPI()
 
-# Load models
+# =========================
+# LOAD MODELS
+# =========================
 rf_model = joblib.load("rf_model.pkl")
 xgb_model = joblib.load("xgb_model.pkl")
 scaler = joblib.load("scaler.pkl")
 
+# =========================
+# SIMPLE USERS DB (SAAS STEP 1)
+# =========================
+USERS = {
+    "user1": {
+        "api_key": "my_secret_12345",
+        "requests": 0,
+        "limit": 3
+    }
+}
 
-# Input schema (must match training order)
+# =========================
+# INPUT SCHEMA
+# =========================
 class Transaction(BaseModel):
     V1: float
     V2: float
@@ -52,31 +59,43 @@ class Transaction(BaseModel):
     Time: float
 
 
-# Check API key status (debug)
-@app.get("/check")
-def check():
-    return {
-        "api_key_loaded": bool(API_KEY)
-    }
+# =========================
+# TEST ROUTE
+# =========================
+@app.get("/")
+def home():
+    return {"message": "Fraud Detection API is running"}
 
-
-# MAIN PREDICTION ENDPOINT
+# =========================
+# MAIN PREDICT ROUTE
+# =========================
 @app.post("/predict")
 def predict(data: Transaction, api_key: str = Header(None)):
 
+    # -------------------------
+    # FIND USER
+    # -------------------------
+    user = None
+    for u in USERS.values():
+        if u["api_key"] == api_key:
+            user = u
+            break
+
+    if not user:
+        return {"error": "Invalid API key"}
+
+    # -------------------------
+    # CHECK LIMIT
+    # -------------------------
+    if user["requests"] >= user["limit"]:
+        return {
+            "error": "Free limit reached. Please upgrade to continue."
+        }
+
     try:
-        # ---------------------------
-        # 1. API KEY VALIDATION
-        # ---------------------------
-        if not API_KEY:
-            return {"error": "Server API key not set"}
-
-        if not api_key or api_key.strip() != API_KEY.strip():
-            return {"error": "Unauthorized"}
-
-        # ---------------------------
-        # 2. CONVERT INPUT
-        # ---------------------------
+        # -------------------------
+        # ORDER FEATURES PROPERLY
+        # -------------------------
         values = [
             data.V1, data.V2, data.V3, data.V4, data.V5,
             data.V6, data.V7, data.V8, data.V9, data.V10,
@@ -87,58 +106,30 @@ def predict(data: Transaction, api_key: str = Header(None)):
             data.Amount, data.Time
         ]
 
+        # -------------------------
+        # PREPROCESS
+        # -------------------------
         input_array = np.array(values).reshape(1, -1)
-
-        # ---------------------------
-        # 3. SCALE INPUT
-        # ---------------------------
         scaled = scaler.transform(input_array)
 
-        # ---------------------------
-        # 4. MODEL PREDICTIONS
-        # ---------------------------
+        # -------------------------
+        # MODEL PREDICTION
+        # -------------------------
         rf_prob = rf_model.predict_proba(scaled)[0][1]
         xgb_prob = xgb_model.predict_proba(scaled)[0][1]
 
         fraud_score = (rf_prob + xgb_prob) / 2
 
-        # ---------------------------
-        # 5. RULES ENGINE (BANK LOGIC)
-        # ---------------------------
-        if data.Amount > 10000:
-            fraud_score = min(fraud_score + 0.15, 1)
+        # -------------------------
+        # UPDATE USER USAGE
+        # -------------------------
+        user["requests"] += 1
 
-        if data.Time < 5000:
-            fraud_score = min(fraud_score + 0.05, 1)
-
-        if data.V14 < -2:
-            fraud_score = min(fraud_score + 0.1, 1)
-
-        # ---------------------------
-        # 6. DECISION ENGINE
-        # ---------------------------
-        if fraud_score < 0.3:
-            risk_level = "LOW"
-            decision = "APPROVE"
-        elif fraud_score < 0.7:
-            risk_level = "MEDIUM"
-            decision = "REVIEW"
-        else:
-            risk_level = "HIGH"
-            decision = "BLOCK"
-
-        # ---------------------------
-        # 7. RESPONSE
-        # ---------------------------
         return {
-            "transaction_id": "TXN_" + str(np.random.randint(1000000, 9999999)),
             "fraud_score": float(fraud_score),
-            "risk_level": risk_level,
-            "decision": decision,
-            "status": "SUCCESS"
+            "status": "FRAUD" if fraud_score > 0.5 else "NORMAL",
+            "remaining_calls": user["limit"] - user["requests"]
         }
 
     except Exception as e:
-        return {
-            "error": str(e)
-        }
+        return {"error": str(e)}
