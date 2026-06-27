@@ -2,7 +2,7 @@ Fraud SaaS Dashboard V6
 
 A full-stack *Machine Learning-powered Fraud Detection SaaS* built with Streamlit + FastAPI-style backend. Predict credit card fraud in real-time using 30 anonymized features.
 
-![Dashboard Preview](https://i.imgur.com/your-screenshot-link-here.png) <!-- Replace with actual image/GIF -->
+[Dashboard preview](images/dashboard.png)
 
 ## ✨ Features
 
